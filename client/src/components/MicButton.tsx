@@ -1,5 +1,5 @@
 interface MicButtonProps {
-  state: "idle" | "listening" | "speaking";
+  state: "idle" | "listening" | "speaking" | "error";
   onPress: () => void;
   disabled?: boolean;
 }
