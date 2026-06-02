@@ -1,0 +1,163 @@
+{
+  "plan_id": "onboarding_v1",
+  "task_type": "onboarding",
+  "required_slots": ["participant_name", "pin", "pin_confirm"],
+  "max_retries_per_step": 3,
+  "stages": [
+    {
+      "stage_id": "welcome",
+      "slot_to_fill": null,
+      "primary_prompt_id": "onboarding.welcome",
+      "expected_input_type": "none",
+      "ui_config": {
+        "screen": "welcome",
+        "show_logo": true,
+        "auto_advance_ms": 3000
+      },
+      "branches": {
+        "auto_advance": {
+          "action": "next_stage",
+          "next_stage": "enter_name"
+        }
+      }
+    },
+    {
+      "stage_id": "enter_name",
+      "slot_to_fill": "participant_name",
+      "primary_prompt_id": "onboarding.enter_name",
+      "expected_input_type": "name",
+      "ui_config": {
+        "screen": "enter_name",
+        "show_mic": true
+      },
+      "branches": {
+        "valid_slot": {
+          "action": "fill_slot",
+          "next_stage": "set_pin"
+        },
+        "ambiguous": {
+          "prompt_id": "onboarding.name_clarify",
+          "action": "retry"
+        },
+        "unrecognized": {
+          "prompt_id": "generic.not_understood",
+          "action": "retry",
+          "attempt_2_prompt_id": "generic.not_understood_2",
+          "attempt_3_action": "modality_switch",
+          "modality_switch_prompt_id": "generic.tap_icon_fallback"
+        },
+        "cancelled": {
+          "prompt_id": "generic.cancelled",
+          "action": "abort_task"
+        },
+        "silent": {
+          "timeout_ms": 4000,
+          "prompt_id": "generic.still_there",
+          "second_timeout_ms": 4000,
+          "fallback_action": "modality_switch",
+          "modality_switch_prompt_id": "generic.tap_icon_fallback"
+        },
+        "help_request": {
+          "prompt_id": "onboarding.name_help",
+          "action": "replay_prompt"
+        },
+        "repeat_request": {
+          "action": "replay_prompt"
+        },
+        "change_request": {
+          "action": "replay_prompt"
+        }
+      }
+    },
+    {
+      "stage_id": "set_pin",
+      "slot_to_fill": "pin",
+      "primary_prompt_id": "onboarding.set_pin",
+      "expected_input_type": "pin",
+      "ui_config": {
+        "screen": "pin_pad",
+        "show_large_numpad": true,
+        "show_mic": false
+      },
+      "branches": {
+        "valid_slot": {
+          "action": "fill_slot",
+          "next_stage": "confirm_pin"
+        },
+        "unrecognized": {
+          "prompt_id": "onboarding.pin_invalid",
+          "action": "retry"
+        },
+        "cancelled": {
+          "prompt_id": "generic.cancelled",
+          "action": "abort_task"
+        },
+        "silent": {
+          "timeout_ms": 4000,
+          "prompt_id": "generic.still_there"
+        },
+        "help_request": {
+          "prompt_id": "onboarding.pin_help",
+          "action": "replay_prompt"
+        },
+        "repeat_request": {
+          "action": "replay_prompt"
+        }
+      }
+    },
+    {
+      "stage_id": "confirm_pin",
+      "slot_to_fill": "pin_confirm",
+      "primary_prompt_id": "onboarding.confirm_pin",
+      "expected_input_type": "pin",
+      "ui_config": {
+        "screen": "pin_pad",
+        "show_large_numpad": true,
+        "show_mic": false
+      },
+      "branches": {
+        "valid_slot": {
+          "action": "fill_slot",
+          "next_stage": "done"
+        },
+        "denied": {
+          "prompt_id": "onboarding.pin_mismatch",
+          "action": "retry",
+          "clear_slot": "pin",
+          "next_stage": "set_pin"
+        },
+        "cancelled": {
+          "prompt_id": "generic.cancelled",
+          "action": "abort_task"
+        },
+        "silent": {
+          "timeout_ms": 4000,
+          "prompt_id": "generic.still_there"
+        },
+        "help_request": {
+          "prompt_id": "onboarding.pin_help",
+          "action": "replay_prompt"
+        },
+        "repeat_request": {
+          "action": "replay_prompt"
+        }
+      }
+    },
+    {
+      "stage_id": "done",
+      "slot_to_fill": null,
+      "primary_prompt_id": "onboarding.done",
+      "prompt_template_vars": ["participant_name"],
+      "expected_input_type": "none",
+      "ui_config": {
+        "screen": "result",
+        "auto_advance_ms": 5000
+      },
+      "branches": {
+        "auto_advance": {
+          "action": "return_home"
+        }
+      }
+    }
+  ]
+}

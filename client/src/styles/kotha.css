@@ -1,0 +1,678 @@
+:root {
+  --primary: #1a73e8;
+  --primary-dark: #1557b0;
+  --success: #34a853;
+  --danger: #ea4335;
+  --warning: #fbbc04;
+  --bg: #f8f9fa;
+  --card-bg: #ffffff;
+  --text: #202124;
+  --text-secondary: #5f6368;
+  --border: #dadce0;
+  --mic-listening: #fbbc04;
+  --mic-speaking: #1a73e8;
+  --mic-idle: #5f6368;
+  --tile-size: 96px;
+  --touch-min: 48px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 18px;
+}
+
+body {
+  font-family: 'Noto Sans Bengali', 'Hind Siliguri', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100dvh;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  max-width: 480px;
+  margin: 0 auto;
+  position: relative;
+}
+
+/* ── Practice Watermark ── */
+.practice-watermark {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-30deg);
+  font-size: 4rem;
+  color: rgba(234, 67, 53, 0.08);
+  pointer-events: none;
+  z-index: 9999;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+/* ── Header ── */
+.app-header {
+  background: var(--primary);
+  color: white;
+  padding: 1rem;
+  text-align: center;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+/* ── Page Container ── */
+.page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  gap: 1.5rem;
+}
+
+/* ── Home Icon Tiles ── */
+.tile-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  width: 100%;
+  max-width: 360px;
+}
+
+.icon-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  background: var(--card-bg);
+  border: 2px solid var(--border);
+  border-radius: 16px;
+  padding: 1.5rem 1rem;
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.1s;
+  min-height: 140px;
+}
+
+.icon-tile:active {
+  transform: scale(0.95);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.icon-tile .tile-icon {
+  font-size: 3rem;
+}
+
+.icon-tile .tile-label {
+  font-size: 1.1rem;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text);
+}
+
+/* ── Recipient Tiles ── */
+.recipient-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 360px;
+}
+
+.recipient-tile {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: var(--card-bg);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+  cursor: pointer;
+  min-height: var(--touch-min);
+}
+
+.recipient-tile:active {
+  background: #e8f0fe;
+  border-color: var(--primary);
+}
+
+.recipient-tile .avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.recipient-tile .name {
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.add-contact-tile {
+  border-style: dashed;
+  border-color: var(--primary);
+}
+
+.add-contact-tile .avatar {
+  background: #e8f0fe;
+  color: var(--primary);
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+/* ── Mic Button ── */
+.mic-container {
+  display: flex;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.mic-button {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  color: white;
+  background: var(--mic-idle);
+  transition: background 0.2s, transform 0.1s;
+}
+
+.mic-button.listening {
+  background: var(--mic-listening);
+  animation: pulse 1.5s infinite;
+}
+
+.mic-button.speaking {
+  background: var(--mic-speaking);
+}
+
+.mic-button:active {
+  transform: scale(0.9);
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(251, 188, 4, 0.4); }
+  70% { box-shadow: 0 0 0 20px rgba(251, 188, 4, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(251, 188, 4, 0); }
+}
+
+/* ── PIN Pad ── */
+.pin-display {
+  font-size: 2.5rem;
+  letter-spacing: 1rem;
+  text-align: center;
+  padding: 1rem;
+  min-height: 60px;
+  color: var(--text);
+}
+
+.pin-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 300px;
+}
+
+.pin-key {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card-bg);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  font-size: 1.8rem;
+  font-weight: 600;
+  min-height: 64px;
+  cursor: pointer;
+}
+
+.pin-key:active {
+  background: #e8f0fe;
+}
+
+.pin-key.danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.pin-key.success {
+  color: var(--success);
+  border-color: var(--success);
+}
+
+/* ── Confirm Screen ── */
+.confirm-card {
+  background: var(--card-bg);
+  border: 2px solid var(--border);
+  border-radius: 16px;
+  padding: 2rem;
+  width: 100%;
+  max-width: 360px;
+  text-align: center;
+}
+
+.confirm-card .amount {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: var(--primary);
+  margin: 1rem 0;
+}
+
+.confirm-card .recipient {
+  font-size: 1.3rem;
+  color: var(--text-secondary);
+}
+
+.confirm-buttons {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 1.5rem;
+}
+
+.btn {
+  padding: 0.75rem 2rem;
+  border: none;
+  border-radius: 12px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  min-height: var(--touch-min);
+  min-width: var(--touch-min);
+}
+
+.btn-confirm {
+  background: var(--success);
+  color: white;
+}
+
+.btn-deny {
+  background: var(--danger);
+  color: white;
+}
+
+/* ── Result Screen ── */
+.result-card {
+  background: var(--card-bg);
+  border: 2px solid var(--success);
+  border-radius: 16px;
+  padding: 2rem;
+  width: 100%;
+  max-width: 360px;
+  text-align: center;
+}
+
+.result-card .checkmark {
+  font-size: 4rem;
+  color: var(--success);
+}
+
+.result-card .message {
+  font-size: 1.2rem;
+  margin-top: 1rem;
+  line-height: 1.6;
+}
+
+/* ── Status Bar ── */
+.status-bar {
+  padding: 0.5rem 1rem;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  background: var(--card-bg);
+  border-top: 1px solid var(--border);
+}
+
+/* ── Prompt Display ── */
+.prompt-text {
+  font-size: 1.3rem;
+  text-align: center;
+  padding: 1rem;
+  line-height: 1.6;
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* ── Balance Display ── */
+.balance-display {
+  background: var(--card-bg);
+  border: 2px solid var(--primary);
+  border-radius: 16px;
+  padding: 2rem;
+  width: 100%;
+  max-width: 360px;
+  text-align: center;
+}
+
+.balance-display .balance-label {
+  font-size: 1.1rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.75rem;
+}
+
+.balance-display .balance-amount {
+  font-size: 3rem;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.transaction-list {
+  width: 100%;
+  max-width: 360px;
+}
+
+.transaction-header {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 0.5rem;
+}
+
+.transaction-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.transaction-type {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.transaction-counterparty {
+  flex: 1;
+  font-weight: 500;
+  text-align: center;
+}
+
+.transaction-amount {
+  font-weight: 600;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+/* ── Operator Grid ── */
+.operator-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  width: 100%;
+  max-width: 360px;
+}
+
+/* ── Number Display ── */
+.number-display {
+  background: var(--card-bg);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem 1.5rem;
+  width: 100%;
+  max-width: 300px;
+  text-align: center;
+  font-size: 1.8rem;
+  font-weight: 600;
+  letter-spacing: 0.15rem;
+  min-height: 60px;
+  color: var(--text);
+}
+
+.number-display .placeholder {
+  color: var(--text-secondary);
+  font-weight: 400;
+  font-size: 1.2rem;
+}
+
+/* ── Onboarding Card ── */
+.onboarding-card {
+  background: var(--card-bg);
+  border: 2px solid var(--primary);
+  border-radius: 20px;
+  padding: 2.5rem 2rem;
+  width: 100%;
+  max-width: 360px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.onboarding-icon {
+  font-size: 4rem;
+}
+
+.onboarding-title {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.onboarding-subtitle {
+  font-size: 1.2rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.onboarding-desc {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.onboarding-btn {
+  width: 100%;
+  margin-top: 1rem;
+  font-size: 1.3rem;
+  padding: 1rem;
+}
+
+/* ── Tutorial Step ── */
+.tutorial-step {
+  background: var(--card-bg);
+  border: 2px solid var(--primary);
+  border-radius: 16px;
+  padding: 2rem;
+  width: 100%;
+  max-width: 360px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.tutorial-step-number {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.tutorial-instruction {
+  font-size: 1.4rem;
+  font-weight: 600;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.tutorial-highlight {
+  font-size: 1.1rem;
+  color: var(--primary);
+  background: #e8f0fe;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  font-weight: 500;
+}
+
+/* ── Fingerprint Scanner ── */
+.fingerprint-card {
+  background: var(--card-bg);
+  border: 2px solid var(--primary);
+  border-radius: 20px;
+  padding: 2.5rem 2rem;
+  width: 100%;
+  max-width: 360px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.fingerprint-icon {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3.5rem;
+  background: #e8f0fe;
+  border: 3px solid var(--primary);
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.fingerprint-icon.scanning {
+  animation: fingerprint-pulse 1s infinite;
+  border-color: var(--warning);
+  background: #fef7e0;
+}
+
+.fingerprint-icon.success {
+  border-color: var(--success);
+  background: #e6f4ea;
+}
+
+@keyframes fingerprint-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(251, 188, 4, 0.4); }
+  70% { box-shadow: 0 0 0 15px rgba(251, 188, 4, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(251, 188, 4, 0); }
+}
+
+.fingerprint-label {
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.fingerprint-touch {
+  padding: 0.75rem 2rem;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-size: 1.2rem;
+  font-weight: 600;
+  cursor: pointer;
+  min-height: var(--touch-min);
+}
+
+.fingerprint-touch:active {
+  transform: scale(0.95);
+}
+
+/* ── Quick Phrase Buttons ── */
+.quick-btn {
+  padding: 0.35rem 0.75rem;
+  background: #e8f0fe;
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.quick-btn:active {
+  background: var(--primary);
+  color: white;
+}
+
+/* ── Login Page ── */
+.login-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2rem 1rem;
+  gap: 1.5rem;
+}
+
+.login-header {
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.login-subtitle {
+  font-size: 1.2rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.account-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+  max-width: 360px;
+}
+
+.account-tile {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: var(--card-bg);
+  border: 2px solid var(--border);
+  border-radius: 16px;
+  padding: 1.25rem 1.5rem;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.account-tile:active {
+  border-color: var(--primary);
+  background: #e8f0fe;
+}
+
+.account-avatar {
+  font-size: 2rem;
+}
+
+.account-name {
+  flex: 1;
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--text);
+  text-align: left;
+}
+
+.account-balance {
+  font-size: 1rem;
+  color: var(--text-secondary);
+}

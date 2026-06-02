@@ -1,0 +1,40 @@
+{
+  "plan_id": "check_balance_v1",
+  "task_type": "check_balance",
+  "required_slots": [],
+  "max_retries_per_step": 3,
+  "stages": [
+    {
+      "stage_id": "show_balance",
+      "slot_to_fill": null,
+      "primary_prompt_id": "balance.current",
+      "prompt_template_vars": ["balance"],
+      "expected_input_type": "none",
+      "ui_config": {
+        "screen": "balance",
+        "show_balance_display": true
+      },
+      "branches": {
+        "auto_advance": {
+          "action": "next_stage",
+          "next_stage": "result"
+        }
+      }
+    },
+    {
+      "stage_id": "result",
+      "slot_to_fill": null,
+      "primary_prompt_id": "balance.done",
+      "expected_input_type": "none",
+      "ui_config": {
+        "screen": "result",
+        "auto_advance_ms": 5000
+      },
+      "branches": {
+        "auto_advance": {
+          "action": "return_home"
+        }
+      }
+    }
+  ]
+}
