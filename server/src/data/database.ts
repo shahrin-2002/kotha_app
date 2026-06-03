@@ -31,7 +31,7 @@ export async function initDatabase(): Promise<void> {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       pin TEXT NOT NULL DEFAULT '1234',
-      balance INTEGER NOT NULL DEFAULT 5000,
+      balance INTEGER NOT NULL DEFAULT 50000,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
@@ -158,7 +158,7 @@ function seedIfEmpty(): void {
 
   for (const p of participants) {
     db.run("INSERT INTO participants (id, name, pin, balance) VALUES (?, ?, ?, ?)", [
-      uuid(), p.name, p.pin, 5000,
+      uuid(), p.name, p.pin, 50000,
     ]);
   }
 
@@ -253,10 +253,10 @@ export function createParticipant(name: string, pin: string): Participant {
   const id = uuid();
   const created_at = new Date().toISOString();
   db.run("INSERT INTO participants (id, name, pin, balance, created_at) VALUES (?, ?, ?, ?, ?)", [
-    id, name, pin, 5000, created_at,
+    id, name, pin, 50000, created_at,
   ]);
   save();
-  return { id, name, pin, balance: 5000, created_at };
+  return { id, name, pin, balance: 50000, created_at };
 }
 
 export function getAllParticipants(): Participant[] {
