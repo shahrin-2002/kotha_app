@@ -80,6 +80,7 @@ export async function classify(
   transcript: string,
   expectedType: string,
   recipientNames: string[] = [],
+  promptText?: string,
 ): Promise<InputClassification> {
   const text = transcript.trim();
   const base: Omit<InputClassification, "type" | "confidence"> = {
@@ -97,7 +98,7 @@ export async function classify(
   if (expectedType === "phone_number") return classifyPhoneNumber(text, base);
 
   // LLM is the primary classifier
-  const llmResult = await llmClassify(text, expectedType, { recipientNames });
+  const llmResult = await llmClassify(text, expectedType, { recipientNames, promptText });
   if (llmResult) return llmResult;
 
   // Rule-based fallback if LLM is unavailable or fails
