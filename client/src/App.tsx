@@ -24,6 +24,8 @@ function App() {
   const lastSpokenRef = useRef("");
   const [textInput, setTextInput] = useState("");
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const lastTranscriptRef = useRef("");
+  const lastTranscriptTimeRef = useRef(0);
 
   const handleLogin = useCallback((sessionData: any) => {
     session.loadSessionData(sessionData);
@@ -42,13 +44,19 @@ function App() {
   }, [session.promptText, session.promptId, session.isLoading, appState, voiceEnabled]);
 
   // Send transcript to server when voice recognizes something
-  // Block if already waiting for a response to prevent overlap
+  // Block if already waiting, and deduplicate repeated transcripts (echo prevention)
   useEffect(() => {
     const text = voice.transcript;
-    if (text && appState === "active" && !session.isLoading) {
-      voice.stopSpeaking();
-      session.sendTranscript(text);
-    }
+    if (!text || appState !== "active" || session.isLoading) return;
+
+    const now = Date.now();
+    const isDuplicate = text === lastTranscriptRef.current && (now - lastTranscriptTimeRef.current) < 4000;
+    if (isDuplicate) return;
+
+    lastTranscriptRef.current = text;
+    lastTranscriptTimeRef.current = now;
+    voice.stopSpeaking();
+    session.sendTranscript(text);
   }, [voice.rawTranscript]);
 
   // When server says farewell (return_home + generic.farewell), go back to login
@@ -63,10 +71,11 @@ function App() {
     }
   }, [session.uiUpdate.return_home, session.promptId]);
 
-  const handleGoHome = useCallback(() => {
+  const handleGoBack = useCallback(() => {
     voice.stopSpeaking();
-    session.sendTap("nav", "home");
+    session.sendTap("nav", "back");
   }, [voice, session.sendTap]);
+
 
   const handleVoiceToggle = useCallback(() => {
     setVoiceEnabled(prev => {
@@ -191,11 +200,17 @@ function App() {
     <>
       <PracticeWatermark />
       <header className="app-header">
-        {screen !== "home" && (
-          <button className="nav-btn home-btn" onClick={handleGoHome}>🏠</button>
+        {screen !== "home" ? (
+          <button className="nav-btn" onClick={handleGoBack}>⬅️</button>
+        ) : (
+          <span style={{ width: 40 }}></span>
         )}
-        <span>কোথা — অনুশীলন</span>
-        <button className="nav-btn voice-btn" onClick={handleVoiceToggle}>
+        <span>কোথা</span>
+        <button
+          className="nav-btn"
+          onClick={handleVoiceToggle}
+          style={{ background: voiceEnabled ? "rgba(52,168,83,0.5)" : "rgba(234,67,53,0.5)" }}
+        >
           {voiceEnabled ? "🔊" : "🔇"}
         </button>
       </header>

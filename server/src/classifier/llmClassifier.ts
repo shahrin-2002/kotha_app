@@ -5,11 +5,7 @@ const client = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 
-const MODEL = "gpt-4.1-nano";
-
-const SYSTEM = `You are a Bangladeshi Bengali voice classifier for a bKash-like MFS app.
-Input: JSON with transcript and screen context.
-Output: JSON only. No explanation. No markdown.`;
+const MODEL = "gpt-4.1-mini";
 
 interface ClassifyContext {
   recipientNames?: string[];
@@ -21,103 +17,82 @@ interface ClassifyContext {
 function buildPrompt(transcript: string, expectedType: string, ctx: ClassifyContext): string | null {
   const screen = ctx.screen ?? "";
   const q = ctx.promptText ?? "";
-  const t = transcript;
 
-  // Screen-specific prompts — we know exactly what the user might say on each screen
   switch (screen) {
     case "home":
-      return JSON.stringify({
-        transcript: t,
-        screen: "home",
-        context: "User is on the bKash home screen. They choose a service.",
-        classify: "intent",
-        options: ["send_money", "cash_out", "recharge", "check_balance", "cancel", "help", "unknown"],
-      });
+      return `Bangladeshi Bengali MFS app. User on home screen choosing a service.
+Transcript: "${transcript}"
+Reply ONLY one of: send_money, cash_out, recharge, check_balance, cancel, help, unknown`;
 
     case "select_recipient": {
       const names = ctx.recipientNames ?? [];
-      return JSON.stringify({
-        transcript: t,
-        screen: "select_recipient",
-        context: "User is choosing who to send money to.",
-        question: q,
-        classify: "name",
-        available_names: names,
-        note: "Ignore Bangla suffixes like কে, রে, ভাই, আপু. Return exact name from list.",
-      });
+      return `User choosing a person to send money to.
+Names: ${names.join(", ")}
+Transcript: "${transcript}"
+Reply ONLY the matched name, or unknown`;
     }
 
     case "select_agent": {
       const names = ctx.agentNames ?? [];
-      return JSON.stringify({
-        transcript: t,
-        screen: "select_agent",
-        context: "User is choosing a cash-out agent.",
-        question: q,
-        classify: "name",
-        available_names: names,
-      });
+      return `User choosing a cash-out agent.
+Names: ${names.join(", ")}
+Transcript: "${transcript}"
+Reply ONLY the matched name, or unknown`;
     }
 
     case "enter_amount":
-      return JSON.stringify({
-        transcript: t,
-        screen: "enter_amount",
-        context: "User is saying how much money (Bangla number). Could be words like হাজার, পাঁচশো, একশো or digits.",
-        question: q,
-        classify: "amount",
-        note: "Return numeric digits only. হাজার alone = 1000.",
-      });
+      return `User saying a money amount in Bangla.
+App asked: "${q}"
+Transcript: "${transcript}"
+Reply ONLY the number in digits, or unknown`;
 
     case "confirm":
-      return JSON.stringify({
-        transcript: t,
-        screen: "confirm",
-        context: "User is confirming or rejecting a transaction.",
-        question: q,
-        classify: "yes_no",
-        options: ["yes", "no", "cancel", "change", "unknown"],
-      });
-
-    case "pin_pad":
-      return null; // PIN is deterministic, no LLM needed
-
-    case "result":
-    case "balance":
-      return null; // Auto-advance screens, no classification needed
+      return `User confirming or rejecting a money transaction.
+App asked: "${q}"
+Transcript: "${transcript}"
+yes = any agreement/confirmation like হ্যাঁ, পাঠাও, দাও, করো, পাঠায় দেন, ঠিক আছে, ok
+no = any rejection like না, নাহ, চাই না
+cancel = বাতিল, থামো
+change = wants to change amount or recipient
+Reply ONLY one of: yes, no, cancel, change, unknown`;
 
     case "select_operator":
-      return JSON.stringify({
-        transcript: t,
-        screen: "select_operator",
-        context: "User is choosing a mobile operator for recharge.",
-        classify: "operator",
-        options: ["গ্রামীণফোন", "রবি", "বাংলালিংক", "টেলিটক", "unknown"],
-      });
+      return `User choosing mobile operator.
+Options: গ্রামীণফোন, রবি, বাংলালিংক, টেলিটক
+Transcript: "${transcript}"
+Reply ONLY the operator name, or unknown`;
 
+    case "pin_pad":
     case "enter_number":
-      return null; // Phone number is deterministic
+    case "result":
+    case "balance":
+      return null;
 
     default:
       break;
   }
 
-  // Fallback: generic classification by expectedType
   if (expectedType === "intent") {
-    return JSON.stringify({
-      transcript: t, classify: "intent",
-      options: ["send_money", "cash_out", "recharge", "check_balance", "cancel", "help", "repeat", "unknown"],
-    });
+    return `Bangladeshi Bengali MFS voice command.
+Transcript: "${transcript}"
+Reply ONLY one of: send_money, cash_out, recharge, check_balance, cancel, help, repeat, unknown`;
   }
   if (expectedType === "recipient_name_or_tap" || expectedType === "agent_name_or_tap") {
     const names = ctx.recipientNames ?? ctx.agentNames ?? [];
-    return JSON.stringify({ transcript: t, question: q, classify: "name", available_names: names });
+    return `User saying a name. Names: ${names.join(", ")}
+Transcript: "${transcript}"
+Reply ONLY the matched name, or unknown`;
   }
   if (expectedType === "amount") {
-    return JSON.stringify({ transcript: t, question: q, classify: "amount" });
+    return `User saying money amount in Bangla.
+Transcript: "${transcript}"
+Reply ONLY the number in digits, or unknown`;
   }
   if (expectedType === "yes_no") {
-    return JSON.stringify({ transcript: t, question: q, classify: "yes_no", options: ["yes", "no", "cancel", "change", "unknown"] });
+    return `User responding yes or no.
+App asked: "${q}"
+Transcript: "${transcript}"
+Reply ONLY one of: yes, no, cancel, change, unknown`;
   }
 
   return null;
@@ -135,46 +110,38 @@ export async function llmClassify(
   if (!userPrompt) return null;
 
   try {
+    const start = Date.now();
     const response = await client.chat.completions.create({
       model: MODEL,
       messages: [
-        { role: "system", content: SYSTEM },
+        { role: "system", content: "Bangladeshi Bengali voice classifier. Reply with ONLY the answer word. No JSON. No explanation." },
         { role: "user", content: userPrompt },
       ],
-      max_tokens: 30,
+      max_tokens: 15,
       temperature: 0,
     });
 
-    const raw = response.choices[0]?.message?.content?.trim() ?? "";
-    console.log(`[LLM classify] "${transcript}" → ${raw}`);
+    const raw = response.choices[0]?.message?.content?.trim() ?? "unknown";
+    const result = raw.toLowerCase().replace(/["""।.]/g, "").trim();
+    const ms = Date.now() - start;
+    console.log(`[LLM] screen=${context.screen} type=${expectedType} | "${transcript}" → "${result}" (${ms}ms)`);
 
-    let parsed: any;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      const cleaned = raw.toLowerCase().replace(/[^a-z0-9_ঀ-৿]/g, "");
-      parsed = { result: cleaned };
-    }
-
-    const result = (parsed.intent ?? parsed.result ?? parsed.name ?? parsed.amount ?? parsed.response ?? parsed.operator ?? raw).toString().trim();
-    const resultLower = result.toLowerCase();
-
-    if (resultLower === "unknown" || !result) return null;
+    if (result === "unknown" || !result) return null;
 
     // Intent
-    if (expectedType === "intent" || (context.screen === "home" && !expectedType)) {
-      if (resultLower === "cancel") return { ...base, type: "cancelled", confidence: 0.9 };
-      if (resultLower === "help") return { ...base, type: "help_request", confidence: 0.9 };
-      if (resultLower === "repeat") return { ...base, type: "repeat_request", confidence: 0.9 };
-      if (["send_money", "cash_out", "recharge", "check_balance"].includes(resultLower)) {
-        return { ...base, type: "valid_slot", extracted_slot: resultLower, slot_type: "intent", confidence: 0.9 };
+    if (expectedType === "intent" || context.screen === "home") {
+      if (result === "cancel") return { ...base, type: "cancelled", confidence: 0.9 };
+      if (result === "help") return { ...base, type: "help_request", confidence: 0.9 };
+      if (result === "repeat") return { ...base, type: "repeat_request", confidence: 0.9 };
+      if (["send_money", "cash_out", "recharge", "check_balance"].includes(result)) {
+        return { ...base, type: "valid_slot", extracted_slot: result, slot_type: "intent", confidence: 0.9 };
       }
     }
 
     // Name
     if (expectedType === "recipient_name_or_tap" || expectedType === "agent_name_or_tap") {
       const names = context.recipientNames ?? context.agentNames ?? [];
-      const matched = names.find(n => n === result || n.toLowerCase() === resultLower || n === (parsed.name ?? ""));
+      const matched = names.find(n => n === raw.trim() || n.toLowerCase() === result);
       if (matched) {
         return { ...base, type: "valid_slot", extracted_slot: matched, slot_type: "recipient_name", confidence: 0.9 };
       }
@@ -182,7 +149,7 @@ export async function llmClassify(
 
     // Amount
     if (expectedType === "amount") {
-      const numStr = (parsed.amount ?? result).toString().replace(/[^\d]/g, "");
+      const numStr = result.replace(/[^\d]/g, "");
       const num = parseInt(numStr, 10);
       if (!isNaN(num) && num > 0) {
         return { ...base, type: "valid_slot", extracted_slot: num, slot_type: "amount", confidence: 0.9 };
@@ -191,18 +158,16 @@ export async function llmClassify(
 
     // Yes/No
     if (expectedType === "yes_no") {
-      const r = (parsed.response ?? parsed.result ?? resultLower).toString().toLowerCase();
-      if (r === "yes") return { ...base, type: "confirmed", confidence: 0.9 };
-      if (r === "no") return { ...base, type: "denied", confidence: 0.9 };
-      if (r === "cancel") return { ...base, type: "cancelled", confidence: 0.9 };
-      if (r === "change") return { ...base, type: "change_request", confidence: 0.9 };
+      if (result === "yes") return { ...base, type: "confirmed", confidence: 0.9 };
+      if (result === "no") return { ...base, type: "denied", confidence: 0.9 };
+      if (result === "cancel") return { ...base, type: "cancelled", confidence: 0.9 };
+      if (result === "change") return { ...base, type: "change_request", confidence: 0.9 };
     }
 
     // Operator
-    if (expectedType === "operator_name_or_tap") {
-      const op = parsed.operator ?? result;
-      if (op && op !== "unknown") {
-        return { ...base, type: "valid_slot", extracted_slot: op, slot_type: "operator", confidence: 0.9 };
+    if (expectedType === "operator_name_or_tap" || context.screen === "select_operator") {
+      if (result && result !== "unknown") {
+        return { ...base, type: "valid_slot", extracted_slot: raw.trim(), slot_type: "operator", confidence: 0.9 };
       }
     }
 

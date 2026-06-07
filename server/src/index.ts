@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import crypto from "crypto";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 import { createServer } from "http";
 import { WebSocketServer, WebSocket } from "ws";
@@ -41,6 +42,16 @@ import { exportSession } from "./instrumentation/sessionExporter.js";
 import type { SessionContext } from "./core/types.js";
 
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
+
+// ── Debug logger — saves every interaction to a file ──────
+const __dirname2 = path.dirname(fileURLToPath(import.meta.url));
+const LOG_DIR = path.resolve(__dirname2, "../data");
+const LOG_FILE = path.join(LOG_DIR, "debug_log.jsonl");
+function debugLog(entry: Record<string, any>) {
+  const line = JSON.stringify({ ts: new Date().toISOString(), ...entry }) + "\n";
+  fs.appendFileSync(LOG_FILE, line);
+  console.log(`[DEBUG] ${entry.event} | ${JSON.stringify(entry).substring(0, 200)}`);
+}
 
 const app = express();
 app.use(cors());
@@ -85,7 +96,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? "";
 let openaiClient: OpenAI | null = null;
 if (OPENAI_API_KEY) {
   openaiClient = new OpenAI({ apiKey: OPENAI_API_KEY });
-  console.log("OpenAI Whisper STT enabled");
+  console.log("OpenAI gpt-4o-transcribe STT enabled");
 } else {
   console.log("⚠️ No OPENAI_API_KEY — server STT disabled");
 }
@@ -101,29 +112,40 @@ app.post("/api/stt", async (req, res) => {
       chunks.push(Buffer.from(chunk));
     }
     const audioBuffer = Buffer.concat(chunks);
-    if (audioBuffer.length < 1000) {
+    if (audioBuffer.length < 3000) {
       res.json({ transcript: "" });
       return;
     }
 
     const file = new File([audioBuffer], "audio.webm", { type: "audio/webm" });
+    const sttStart = Date.now();
     const transcription = await openaiClient.audio.transcriptions.create({
       file,
-      model: "gpt-4o-mini-transcribe",
+      model: "gpt-4o-transcribe",
       language: "bn",
-      prompt: "বাংলাদেশি বাংলা। বিকাশ মোবাইল ব্যাংকিং। টাকা পাঠান, ক্যাশ আউট, রিচার্জ, ব্যালেন্স। হ্যাঁ, না, বাতিল। করিম, রহিমা, জামাল। একশো, দুইশো, পাঁচশো, এক হাজার, দুই হাজার। পাঁচশ টাকা, হাজার টাকা।",
+      temperature: 0,
+      prompt: "এটি বাংলাদেশের বাংলা কথোপকথন। বাংলা লিপিতে ট্রান্সক্রাইব করুন। নামগুলো বাংলা লিপিতে রাখুন। ল্যাটিন, হিন্দি বা ইংরেজিতে অনুবাদ করবেন না।",
     });
+    const sttMs = Date.now() - sttStart;
 
-    // Filter Whisper hallucinations — when given silence, it repeats junk
     const t = (transcription.text ?? "").trim();
-    const isHallucination = t.length > 60 || t.includes("কথোপকথন") || t.includes("সাবটাইটেল") || t.includes("subscribe");
-    if (isHallucination) {
-      console.log(`[STT] hallucination filtered: "${t.substring(0, 50)}..."`);
+
+    // Filter: must contain at least one Bengali character — no Latin-only, no Thai, no Armenian
+    const hasBangla = /[অ-ঔক-হা-ৌৎ০-৯ং-ঃঁ]/.test(t);
+
+    // Filter: hallucinations (STT echoing prompts or generating nonsense)
+    const isHallucination = t.length > 80 || t.includes("কথোপকথন") || t.includes("সাবটাইটেল") || t.includes("subscribe") || t.includes("বিকাশ মোবাইল") || t.includes("ক্যাশ আউট, রিচার্জ") || t.includes("বাংলা লিপিতে") || t.includes("ল্যাটিন") || t.includes("অনুবাদ করবেন না");
+
+    if (!hasBangla || isHallucination) {
+      const reason = !hasBangla ? "no_bangla" : "hallucination";
+      console.log(`[STT] filtered (${sttMs}ms) [${reason}]: "${t.substring(0, 50)}"`);
+      debugLog({ event: "stt_filtered", text: t, reason, latency_ms: sttMs });
       res.json({ transcript: "" });
       return;
     }
 
-    console.log(`[STT] "${transcription.text}"`);
+    console.log(`[STT] "${t}" (${sttMs}ms)`);
+    debugLog({ event: "stt", transcript: t, audioSizeKB: (audioBuffer.length / 1024).toFixed(1), latency_ms: sttMs });
     res.json({ transcript: transcription.text ?? "" });
   } catch (err: any) {
     console.error("[STT error]", err.message);
@@ -324,11 +346,22 @@ app.post("/api/voice-turn", async (req, res) => {
   }
 
   const prevTaskType = session.task_type;
+  const prevStage = session.current_stage_id;
   const prevRetryCount = session.retry_count;
   const prevModality = session.is_modality_switched;
 
+  debugLog({
+    event: "voice_turn_in",
+    transcript,
+    task_type: session.task_type,
+    stage: session.current_stage_id,
+    filled_slots: { ...session.filled_slots },
+    awaiting_post_transaction: session.awaiting_post_transaction,
+  });
+
   const recipients = getRecipients(session.participant_id);
   const agents = getAgents();
+  const turnStart = Date.now();
   const result = await handleVoiceTurn(
     session,
     transcript,
@@ -337,6 +370,20 @@ app.post("/api/voice-turn", async (req, res) => {
     participant.balance,
     agents,
   );
+  const turnMs = Date.now() - turnStart;
+
+  debugLog({
+    event: "voice_turn_out",
+    transcript,
+    prev_stage: prevStage,
+    new_stage: session.current_stage_id,
+    task_type: session.task_type,
+    filled_slots: { ...session.filled_slots },
+    prompt_id: result.prompt_id,
+    prompt_text: result.prompt_text,
+    screen: result.ui_update.screen,
+    latency_ms: turnMs,
+  });
 
   // ── Metric tracking ──────────────────────────────────
   // Detect new task start (task_type changed from null to something)

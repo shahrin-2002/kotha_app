@@ -307,6 +307,29 @@ export async function handleTapSelection(
     return makeResponse(session, text, "home.welcome", "home", true);
   }
 
+  if (tapType === "nav" && tapValue === "back") {
+    if (!session.task_type || !session.current_stage_id) {
+      const text = resolvePrompt("home.welcome");
+      return makeResponse(session, text, "home.welcome", "home", true);
+    }
+    const plan = getPlan(session.task_type)!;
+    const currentIdx = plan.stages.findIndex((s) => s.stage_id === session.current_stage_id);
+    if (currentIdx <= 0) {
+      logEvent(session, "nav_back", { to: "home" });
+      resetTask(session);
+      const text = resolvePrompt("home.welcome");
+      return makeResponse(session, text, "home.welcome", "home", true);
+    }
+    const prevStage = plan.stages[currentIdx - 1];
+    session.current_stage_id = prevStage.stage_id;
+    if (prevStage.slot_to_fill) {
+      delete session.filled_slots[prevStage.slot_to_fill];
+    }
+    logEvent(session, "nav_back", { to: prevStage.stage_id });
+    const text = resolvePrompt(prevStage.primary_prompt_id, session.filled_slots);
+    return makeResponse(session, text, prevStage.primary_prompt_id, prevStage.ui_config.screen as string);
+  }
+
   if (tapType === "task_select") {
     session.awaiting_post_transaction = false;
     return startTask(session, tapValue, participantBalance, agents);
