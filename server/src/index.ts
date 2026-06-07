@@ -111,6 +111,7 @@ app.post("/api/stt", async (req, res) => {
       file,
       model: "gpt-4o-transcribe",
       language: "bn",
+      prompt: "বাংলাদেশি বাংলা। বিকাশ মোবাইল ব্যাংকিং। টাকা পাঠান, ক্যাশ আউট, রিচার্জ, ব্যালেন্স। হ্যাঁ, না, বাতিল। করিম, রহিমা, জামাল। একশো, দুইশো, পাঁচশো, এক হাজার, দুই হাজার। পাঁচশ টাকা, হাজার টাকা।",
     });
 
     // Filter Whisper hallucinations — when given silence, it repeats junk

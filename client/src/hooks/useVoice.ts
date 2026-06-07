@@ -123,7 +123,7 @@ export function useVoice() {
     const analyser = analyserRef.current;
     const stream = mediaStreamRef.current;
     const dataArray = new Uint8Array(analyser.fftSize);
-    const START_THRESHOLD = 6;
+    const START_THRESHOLD = 4;
     const STOP_THRESHOLD = 2;
     const SILENCE_DURATION = 1000;
     let frameCount = 0;

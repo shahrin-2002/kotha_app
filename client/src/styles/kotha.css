@@ -62,10 +62,36 @@ body {
 .app-header {
   background: var(--primary);
   color: white;
-  padding: 1rem;
+  padding: 0.6rem 1rem;
   text-align: center;
   font-size: 1.2rem;
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.app-header span {
+  flex: 1;
+}
+
+.nav-btn {
+  background: rgba(255,255,255,0.2);
+  border: none;
+  color: white;
+  font-size: 1.3rem;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-btn:active {
+  background: rgba(255,255,255,0.4);
 }
 
 /* ── Page Container ── */

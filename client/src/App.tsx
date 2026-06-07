@@ -23,12 +23,13 @@ function App() {
   const [appState, setAppState] = useState<"login" | "active">("login");
   const lastSpokenRef = useRef("");
   const [textInput, setTextInput] = useState("");
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
 
   const handleLogin = useCallback((sessionData: any) => {
     session.loadSessionData(sessionData);
     setAppState("active");
-    voice.startListening();
-  }, [session.loadSessionData, voice]);
+    if (voiceEnabled) voice.startListening();
+  }, [session.loadSessionData, voice, voiceEnabled]);
 
   // Speak new prompts only — track what we already spoke to avoid re-triggering
   useEffect(() => {
@@ -37,8 +38,8 @@ function App() {
     const key = session.promptId + "|" + session.promptText;
     if (lastSpokenRef.current === key) return;
     lastSpokenRef.current = key;
-    voice.speak(session.promptText);
-  }, [session.promptText, session.promptId, session.isLoading, appState]);
+    if (voiceEnabled) voice.speak(session.promptText);
+  }, [session.promptText, session.promptId, session.isLoading, appState, voiceEnabled]);
 
   // Send transcript to server when voice recognizes something
   // Block if already waiting for a response to prevent overlap
@@ -61,6 +62,23 @@ function App() {
       return () => clearTimeout(timer);
     }
   }, [session.uiUpdate.return_home, session.promptId]);
+
+  const handleGoHome = useCallback(() => {
+    voice.stopSpeaking();
+    session.sendTap("nav", "home");
+  }, [voice, session.sendTap]);
+
+  const handleVoiceToggle = useCallback(() => {
+    setVoiceEnabled(prev => {
+      if (prev) {
+        voice.stopSpeaking();
+        voice.stopListening();
+      } else {
+        voice.startListening();
+      }
+      return !prev;
+    });
+  }, [voice]);
 
   const handleMicPress = useCallback(() => {
     if (voice.voiceState === "speaking") {
@@ -172,7 +190,15 @@ function App() {
   return (
     <>
       <PracticeWatermark />
-      <header className="app-header">কোথা — অনুশীলন</header>
+      <header className="app-header">
+        {screen !== "home" && (
+          <button className="nav-btn home-btn" onClick={handleGoHome}>🏠</button>
+        )}
+        <span>কোথা — অনুশীলন</span>
+        <button className="nav-btn voice-btn" onClick={handleVoiceToggle}>
+          {voiceEnabled ? "🔊" : "🔇"}
+        </button>
+      </header>
 
       {session.error && (
         <div className="status-bar" style={{ color: "var(--danger)" }}>
@@ -228,6 +254,7 @@ function App() {
         <ConfirmPage
           promptText={session.promptText}
           recipientName={String(slots.recipient_name ?? "")}
+          recipientPhone={String(slots.recipient_phone ?? "")}
           amount={Number(slots.amount ?? 0)}
           onConfirm={handleConfirm}
           onDeny={handleDeny}

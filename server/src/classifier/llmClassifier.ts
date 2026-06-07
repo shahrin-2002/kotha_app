@@ -16,27 +16,43 @@ export async function llmClassify(
 
   let systemPrompt = "";
 
+  const DIALECT_CONTEXT = `IMPORTANT: The user speaks Bangladeshi Bengali (বাংলাদেশি বাংলা), NOT Indian/Kolkata Bengali.
+Common dialect features: "হ্যাঁ"/"হ্যা"/"আ" for yes, "না"/"নাহ"/"নাই" for no, "পাঠামু"/"পাঠাইতাম" instead of "পাঠাবো",
+"কত টেকা"/"কত ট্যাকা" for "কত টাকা", "পাঁচশ" for 500, "হাজার" = 1000, "ড্যাশ আউট"/"ক্যাশআউট" for cash out.
+The audio comes from Whisper STT which may produce slight transcription errors. Be lenient with spelling variations.`;
+
   if (expectedType === "intent") {
-    systemPrompt = `You classify Bangla MFS voice commands. The user wants to do one of: send_money, cash_out, recharge, check_balance.
-They may say things like "টাকা পাঠাবো", "ক্যাশ আউট করবো", "রিচার্জ করবো", "ব্যালেন্স দেখবো" or similar.
-They might also say: cancel (বাতিল/থামো), help (সাহায্য/কী করতে হবে), or repeat (আবার বলো).
+    systemPrompt = `${DIALECT_CONTEXT}
+You classify Bangla MFS (mobile financial service like bKash) voice commands.
+Tasks: send_money, cash_out, recharge, check_balance.
+Examples:
+- send_money: "টাকা পাঠাবো", "টাকা পাঠামু", "পাঠান", "সেন্ড করবো", "টাকা দিবো", "টাকা দিতে চাই", "পাঠাইতে চাই"
+- cash_out: "ক্যাশ আউট", "ড্যাশ আউট", "ক্যাশআউট", "টাকা তুলবো", "তুলতে চাই", "টাকা তুলুম"
+- recharge: "রিচার্জ", "রিচার্জ করবো", "ফ্লেক্সি লোড", "মোবাইল রিচার্জ"
+- check_balance: "ব্যালেন্স", "ব্যালান্স", "কত আছে", "কত টাকা আছে", "হিসাব দেখবো", "জমা কত"
+Also: cancel (বাতিল/থামো), help (সাহায্য/কী করতে হবে), repeat (আবার বলো).
 Respond with ONLY one of: send_money, cash_out, recharge, check_balance, cancel, help, repeat, unknown`;
   } else if (expectedType === "recipient_name_or_tap" || expectedType === "agent_name_or_tap") {
     const names = context.recipientNames ?? context.agentNames ?? [];
-    systemPrompt = `You extract a person's name from Bangla speech. Available names: ${names.join(", ")}.
-The user may say things like "করিমকে পাঠাবো" (send to Korim), "রহিমা" (Rohima), "জামাল ভাই" (Jamal bhai).
-Extract the matching name from the available list. Handle suffixes like কে, র, তে, ভাই, আপু.
+    systemPrompt = `${DIALECT_CONTEXT}
+You extract a person's name from Bangladeshi Bangla speech. Available names: ${names.join(", ")}.
+The user may say: "করিমকে পাঠাবো", "রহিমারে দাও", "জামাল ভাইরে", "করিম ভাই", "রহিমা আপু".
+Handle suffixes: কে, রে, র, তে, ভাই, আপু, দের, ের. Also handle Whisper misspellings.
 Respond with ONLY the matched name from the list, or "unknown" if no match.`;
   } else if (expectedType === "amount") {
-    systemPrompt = `You extract a monetary amount from Bangla speech. The user says an amount in Bangla like "পাঁচশো টাকা" (500), "একশো" (100), "দুই হাজার" (2000).
-They might also say numbers in English mixed with Bangla. Extract the numeric value.
+    systemPrompt = `${DIALECT_CONTEXT}
+You extract a monetary amount from Bangladeshi Bangla speech for bKash transactions.
+Examples: "পাঁচশো টাকা"=500, "একশো"=100, "দুই হাজার"=2000, "এক হাজার"=1000, "হাজার টাকা"=1000,
+"পাঁচশ"=500, "১ হাজার"=1000, "তিনশো"=300, "দশ হাজার"=10000, "পঞ্চাশ"=50.
+Bare "হাজার" without number = 1000. "পাচশো"/"পাঁচশ"/"পাচশ" all = 500.
 Respond with ONLY the number (digits), or "unknown" if you can't extract an amount.`;
   } else if (expectedType === "yes_no") {
-    systemPrompt = `You classify Bangla yes/no responses.
-Yes: হ্যাঁ, জি, ঠিক আছে, হয়, করো, ok, yes
-No: না, নাহ, চাই না, no
-Cancel: বাতিল, থামো
-Change: বদলাও, পাল্টাও
+    systemPrompt = `${DIALECT_CONTEXT}
+You classify Bangladeshi Bangla yes/no responses in an MFS app context.
+Yes: হ্যাঁ, হ্যা, হা, আ, জি, জ্বি, ঠিক, ঠিক আছে, হয়, করো, হ্যাঁ করো, ok, yes, হ, যা
+No: না, নাহ, নাই, চাই না, দরকার নেই, no, না না
+Cancel: বাতিল, থামো, বন্ধ
+Change: বদলাও, পাল্টাও, ঠিক না
 Respond with ONLY one of: yes, no, cancel, change, unknown`;
   } else {
     return null;

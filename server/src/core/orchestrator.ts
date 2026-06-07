@@ -297,6 +297,14 @@ export async function handleTapSelection(
   participantBalance: number,
   agents: Agent[] = [],
 ): Promise<OrchestratorResponse> {
+  if (tapType === "nav" && tapValue === "home") {
+    session.awaiting_post_transaction = false;
+    logEvent(session, "nav_home", { from_task: session.task_type });
+    resetTask(session);
+    const text = resolvePrompt("home.welcome");
+    return makeResponse(session, text, "home.welcome", "home", true);
+  }
+
   if (tapType === "task_select") {
     session.awaiting_post_transaction = false;
     return startTask(session, tapValue, participantBalance, agents);

@@ -3,8 +3,8 @@ import { parseBanglaNumber } from "../bangla/numberParser.js";
 import { fuzzyMatchRecipient } from "../bangla/fuzzyMatch.js";
 import { llmClassify } from "./llmClassifier.js";
 
-const YES_WORDS = ["হ্যাঁ", "হ্যা", "হা", "জি", "জ্বি", "ঠিক", "ঠিক আছে", "আছে", "হয়", "করো", "করুন", "পাঠাও", "পাঠান", "হ্যাঁ হ্যাঁ", "ওকে"];
-const NO_WORDS = ["না", "নাহ", "না না", "নাই", "চাই না", "দরকার নেই"];
+const YES_WORDS = ["হ্যাঁ", "হ্যা", "হা", "আ", "হ", "জি", "জ্বি", "ঠিক", "ঠিক আছে", "আছে", "হয়", "করো", "করুন", "পাঠাও", "পাঠান", "হ্যাঁ হ্যাঁ", "ওকে", "যা", "হ্যাঁ করো", "কর", "হুম", "হুঁ"];
+const NO_WORDS = ["না", "নাহ", "না না", "নাই", "চাই না", "দরকার নেই", "লাগবে না", "করবো না", "করব না"];
 const CANCEL_WORDS = ["বাতিল", "থামো", "থামুন", "ফিরে যাও", "ফিরে যান", "বন্ধ", "শেষ", "যাই", "বাদ দাও", "বাদ দিন"];
 const HELP_WORDS = ["কী করতে হবে", "কি করতে হবে", "সাহায্য", "বুঝি নাই", "বুঝিনি", "কিভাবে", "কীভাবে", "শেখাও", "শেখান"];
 const REPEAT_WORDS = ["আবার বলো", "আবার বলুন", "আবার", "কী বললে", "কি বললে", "বুঝিনি আবার বলো"];
@@ -29,11 +29,14 @@ const INTENT_KEYWORDS: Record<string, string> = {
   "send": "send_money",
   "ক্যাশ আউট": "cash_out",
   "ক্যাশআউট": "cash_out",
+  "ড্যাশ আউট": "cash_out",
+  "ক্যাশ": "cash_out",
   "টাকা তুল": "cash_out",
   "তুলব": "cash_out",
   "তুলবো": "cash_out",
   "তুলতে": "cash_out",
   "তোলা": "cash_out",
+  "তুলুম": "cash_out",
   "উইথড্র": "cash_out",
   "cash": "cash_out",
   "রিচার্জ": "recharge",

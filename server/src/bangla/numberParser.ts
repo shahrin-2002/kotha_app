@@ -17,14 +17,14 @@ const BANGLA_WORDS: Record<string, number> = {
   "পঁয়ত্রিশ": 35, "ছত্রিশ": 36, "সাতত্রিশ": 37, "আটত্রিশ": 38, "উনচল্লিশ": 39,
   "চল্লিশ": 40, "একচল্লিশ": 41, "বিয়াল্লিশ": 42, "তেতাল্লিশ": 43, "চুয়াল্লিশ": 44,
   "পঁয়তাল্লিশ": 45, "ছেচল্লিশ": 46, "সাতচল্লিশ": 47, "আটচল্লিশ": 48, "উনপঞ্চাশ": 49,
-  "পঞ্চাশ": 50, "পচাশ": 50,
+  "পঞ্চাশ": 50, "পচাশ": 50, "পঞ্চাস": 50, "পঁচাশ": 50,
   "ষাট": 60, "সত্তর": 70, "আশি": 80, "নব্বই": 90,
 
-  "একশ": 100, "একশো": 100, "একশত": 100,
-  "দুইশ": 200, "দুইশো": 200, "দুশো": 200, "দুশত": 200,
+  "একশ": 100, "একশো": 100, "একশত": 100, "একশোো": 100, "এক শ": 100,
+  "দুইশ": 200, "দুইশো": 200, "দুশো": 200, "দুশত": 200, "দুশ": 200,
   "তিনশ": 300, "তিনশো": 300, "তিনশত": 300,
   "চারশ": 400, "চারশো": 400,
-  "পাঁচশ": 500, "পাঁচশো": 500, "পাঁচশত": 500,
+  "পাঁচশ": 500, "পাঁচশো": 500, "পাঁচশত": 500, "পাচশো": 500, "পাচশ": 500, "পাঁশশো": 500,
   "ছয়শ": 600, "ছয়শো": 600,
   "সাতশ": 700, "সাতশো": 700,
   "আটশ": 800, "আটশো": 800,
@@ -42,7 +42,16 @@ function banglaDigitsToAscii(text: string): string {
 }
 
 export function parseBanglaNumber(text: string): number | null {
-  const cleaned = text.trim().replace(/টাকা/g, "").trim();
+  const cleaned = text.trim()
+    .replace(/টাকা/g, "")
+    .replace(/ট্যাকা/g, "")
+    .replace(/টেকা/g, "")
+    .replace(/তাকা/g, "")
+    .replace(/।/g, "")
+    .replace(/\./g, "")
+    .trim();
+
+  if (!cleaned) return null;
 
   const asciiVersion = banglaDigitsToAscii(cleaned);
   const directNum = parseInt(asciiVersion, 10);
@@ -52,6 +61,10 @@ export function parseBanglaNumber(text: string): number | null {
 
   const directMatch = BANGLA_WORDS[cleaned];
   if (directMatch !== undefined) return directMatch;
+
+  // Handle bare multiplier words: "হাজার" → 1000, "লাখ" → 100000
+  if (cleaned === "হাজার") return 1000;
+  if (cleaned === "লাখ") return 100000;
 
   const tokens = cleaned.split(/\s+/);
   let total = 0;
