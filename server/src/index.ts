@@ -109,7 +109,7 @@ app.post("/api/stt", async (req, res) => {
     const file = new File([audioBuffer], "audio.webm", { type: "audio/webm" });
     const transcription = await openaiClient.audio.transcriptions.create({
       file,
-      model: "gpt-4o-transcribe",
+      model: "gpt-4o-mini-transcribe",
       language: "bn",
       prompt: "বাংলাদেশি বাংলা। বিকাশ মোবাইল ব্যাংকিং। টাকা পাঠান, ক্যাশ আউট, রিচার্জ, ব্যালেন্স। হ্যাঁ, না, বাতিল। করিম, রহিমা, জামাল। একশো, দুইশো, পাঁচশো, এক হাজার, দুই হাজার। পাঁচশ টাকা, হাজার টাকা।",
     });

@@ -5,6 +5,12 @@ const client = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 
+const MODEL = "gpt-4.1-nano";
+
+const SYSTEM = `You are a Bangladeshi Bengali voice classifier for a bKash-like MFS app.
+Input: speech-to-text transcript from rural Bangladeshi women (may have STT errors/dialect).
+Output: JSON only. No explanation.`;
+
 export async function llmClassify(
   transcript: string,
   expectedType: string,
@@ -13,74 +19,46 @@ export async function llmClassify(
   if (!client) return null;
 
   const base = { raw_transcript: transcript };
-
-  const SYSTEM = `You are the brain of a Bangladeshi bKash-like mobile financial service app.
-You process voice input from rural Bangladeshi women who speak Bangladeshi Bengali (বাংলাদেশি বাংলা).
-The text comes from Whisper speech recognition and may have transcription errors or dialect variations.
-Use your full understanding of Bangla language, dialects, and context to interpret what the user meant.`;
-
-  let taskPrompt = "";
+  let userPrompt = "";
 
   if (expectedType === "intent") {
-    taskPrompt = `The app asked the user what they want to do.
-The user's voice was transcribed as: "${transcript}"
-
-Classify their intent. Options:
-- send_money (sending money to someone)
-- cash_out (withdrawing cash from an agent)
-- recharge (mobile phone recharge/top-up)
-- check_balance (checking account balance)
-- cancel (wants to stop/go back)
-- help (asking for help)
-- repeat (wants to hear the prompt again)
-- unknown (can't determine intent)
-
-Respond with ONLY one option.`;
+    userPrompt = `{"transcript":"${transcript}","classify_as":"intent","options":["send_money","cash_out","recharge","check_balance","cancel","help","repeat","unknown"]}`;
   } else if (expectedType === "recipient_name_or_tap" || expectedType === "agent_name_or_tap") {
     const names = context.recipientNames ?? context.agentNames ?? [];
-    taskPrompt = `The app asked: "${context.promptText ?? "কাকে পাঠাবেন?"}"
-Available names: ${names.join(", ")}
-The user's voice was transcribed as: "${transcript}"
-
-Which name from the list is the user referring to? Ignore Bangla suffixes (কে, রে, র, ভাই, আপু, etc.).
-Respond with ONLY the exact name from the list, or "unknown".`;
+    userPrompt = `{"transcript":"${transcript}","question":"${context.promptText ?? ""}","classify_as":"name","available_names":[${names.map(n => `"${n}"`).join(",")}]}`;
   } else if (expectedType === "amount") {
-    taskPrompt = `The app asked: "${context.promptText ?? "কত টাকা?"}"
-The user's voice was transcribed as: "${transcript}"
-
-Extract the monetary amount as a number.
-Respond with ONLY the number in digits (e.g., 500, 1000, 2000), or "unknown".`;
+    userPrompt = `{"transcript":"${transcript}","question":"${context.promptText ?? ""}","classify_as":"amount"}`;
   } else if (expectedType === "yes_no") {
-    taskPrompt = `The app asked: "${context.promptText ?? "ঠিক আছে?"}"
-The user's voice was transcribed as: "${transcript}"
-
-What is the user's response?
-- yes (confirming/agreeing)
-- no (declining/disagreeing)
-- cancel (wants to cancel the whole task)
-- change (wants to change something like amount or recipient)
-- unknown
-
-Respond with ONLY one option.`;
+    userPrompt = `{"transcript":"${transcript}","question":"${context.promptText ?? ""}","classify_as":"yes_no","options":["yes","no","cancel","change","unknown"]}`;
   } else {
     return null;
   }
 
   try {
     const response = await client.chat.completions.create({
-      model: "gpt-4.1-mini",
+      model: MODEL,
       messages: [
         { role: "system", content: SYSTEM },
-        { role: "user", content: taskPrompt },
+        { role: "user", content: userPrompt },
       ],
-      max_tokens: 20,
+      max_tokens: 30,
       temperature: 0,
     });
 
-    const result = response.choices[0]?.message?.content?.trim().toLowerCase() ?? "unknown";
-    console.log(`[LLM classify] "${transcript}" → ${result}`);
+    const raw = response.choices[0]?.message?.content?.trim() ?? "";
+    console.log(`[LLM classify] "${transcript}" → ${raw}`);
 
-    if (result === "unknown") return null;
+    let parsed: any;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      const cleaned = raw.toLowerCase().replace(/[^a-z0-9_]/g, "");
+      parsed = { result: cleaned };
+    }
+
+    const result = (parsed.intent ?? parsed.result ?? parsed.name ?? parsed.amount ?? parsed.response ?? raw).toString().toLowerCase().trim();
+
+    if (result === "unknown" || !result) return null;
 
     if (expectedType === "intent") {
       if (result === "cancel") return { ...base, type: "cancelled", confidence: 0.9 };
@@ -93,25 +71,26 @@ Respond with ONLY one option.`;
 
     if (expectedType === "recipient_name_or_tap" || expectedType === "agent_name_or_tap") {
       const names = context.recipientNames ?? context.agentNames ?? [];
-      const matched = names.find(n => n === result || n.toLowerCase() === result);
+      const matched = names.find(n => n === result || n.toLowerCase() === result || n === (parsed.name ?? ""));
       if (matched) {
         return { ...base, type: "valid_slot", extracted_slot: matched, slot_type: "recipient_name", confidence: 0.9 };
       }
     }
 
     if (expectedType === "amount") {
-      const cleaned = result.replace(/[^\d]/g, "");
-      const num = parseInt(cleaned, 10);
+      const numStr = (parsed.amount ?? result).toString().replace(/[^\d]/g, "");
+      const num = parseInt(numStr, 10);
       if (!isNaN(num) && num > 0) {
         return { ...base, type: "valid_slot", extracted_slot: num, slot_type: "amount", confidence: 0.9 };
       }
     }
 
     if (expectedType === "yes_no") {
-      if (result === "yes") return { ...base, type: "confirmed", confidence: 0.9 };
-      if (result === "no") return { ...base, type: "denied", confidence: 0.9 };
-      if (result === "cancel") return { ...base, type: "cancelled", confidence: 0.9 };
-      if (result === "change") return { ...base, type: "change_request", confidence: 0.9 };
+      const r = parsed.response ?? parsed.result ?? result;
+      if (r === "yes") return { ...base, type: "confirmed", confidence: 0.9 };
+      if (r === "no") return { ...base, type: "denied", confidence: 0.9 };
+      if (r === "cancel") return { ...base, type: "cancelled", confidence: 0.9 };
+      if (r === "change") return { ...base, type: "change_request", confidence: 0.9 };
     }
 
     return null;
