@@ -90,6 +90,17 @@ export async function classify(
     return { ...base, type: "silent", confidence: 1.0 };
   }
 
+  // Deterministic types that don't need LLM
+  if (expectedType === "pin") return classifyPin(text, base);
+  if (expectedType === "tap") return { ...base, type: "valid_slot", extracted_slot: text, slot_type: "tap", confidence: 0.9 };
+  if (expectedType === "name" && text.length > 0) return { ...base, type: "valid_slot", extracted_slot: text, slot_type: "name", confidence: 0.8 };
+  if (expectedType === "phone_number") return classifyPhoneNumber(text, base);
+
+  // LLM is the primary classifier
+  const llmResult = await llmClassify(text, expectedType, { recipientNames });
+  if (llmResult) return llmResult;
+
+  // Rule-based fallback if LLM is unavailable or fails
   if (matchesAny(text, CANCEL_WORDS)) {
     return { ...base, type: "cancelled", confidence: 0.9 };
   }
@@ -106,51 +117,21 @@ export async function classify(
     case "intent":
       result = classifyIntent(text, base);
       break;
-
     case "recipient_name_or_tap":
-      result = classifyRecipient(text, recipientNames, base);
-      break;
-
-    case "amount":
-      result = classifyAmount(text, base);
-      break;
-
-    case "yes_no":
-      result = classifyYesNo(text, base);
-      break;
-
-    case "pin":
-      return classifyPin(text, base);
-
     case "agent_name_or_tap":
       result = classifyRecipient(text, recipientNames, base);
       break;
-
+    case "amount":
+      result = classifyAmount(text, base);
+      break;
+    case "yes_no":
+      result = classifyYesNo(text, base);
+      break;
     case "operator_name_or_tap":
       result = classifyOperator(text, base);
       break;
-
-    case "phone_number":
-      result = classifyPhoneNumber(text, base);
-      break;
-
-    case "tap":
-      return { ...base, type: "valid_slot", extracted_slot: text, slot_type: "tap", confidence: 0.9 };
-
-    case "name":
-      if (text.length > 0) {
-        return { ...base, type: "valid_slot", extracted_slot: text, slot_type: "name", confidence: 0.8 };
-      }
-      return { ...base, type: "unrecognized", confidence: 0.5 };
-
     default:
       result = { ...base, type: "unrecognized", confidence: 0.3 };
-  }
-
-  // LLM fallback when rules can't classify
-  if (result.type === "unrecognized") {
-    const llmResult = await llmClassify(text, expectedType, { recipientNames });
-    if (llmResult) return llmResult;
   }
 
   return result;
