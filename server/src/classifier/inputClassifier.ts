@@ -81,6 +81,7 @@ export async function classify(
   expectedType: string,
   recipientNames: string[] = [],
   promptText?: string,
+  screen?: string,
 ): Promise<InputClassification> {
   const text = transcript.trim();
   const base: Omit<InputClassification, "type" | "confidence"> = {
@@ -97,8 +98,8 @@ export async function classify(
   if (expectedType === "name" && text.length > 0) return { ...base, type: "valid_slot", extracted_slot: text, slot_type: "name", confidence: 0.8 };
   if (expectedType === "phone_number") return classifyPhoneNumber(text, base);
 
-  // LLM is the primary classifier
-  const llmResult = await llmClassify(text, expectedType, { recipientNames, promptText });
+  // LLM is the primary classifier — with screen context for precise prompts
+  const llmResult = await llmClassify(text, expectedType, { recipientNames, promptText, screen });
   if (llmResult) return llmResult;
 
   // Rule-based fallback if LLM is unavailable or fails

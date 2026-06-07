@@ -106,7 +106,8 @@ export async function handleVoiceTurn(
     ? agents.map((a) => a.name)
     : recipients.map((r) => r.name);
   const stagePromptText = resolvePrompt(stage.primary_prompt_id, session.filled_slots);
-  const classification = await classify(transcript, stage.expected_input_type, knownNames, stagePromptText);
+  const stageScreen = stage.ui_config.screen as string;
+  const classification = await classify(transcript, stage.expected_input_type, knownNames, stagePromptText, stageScreen);
   logEvent(session, "classify", {
     stage_id: stage.stage_id,
     transcript,
