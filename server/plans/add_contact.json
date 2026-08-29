@@ -1,0 +1,71 @@
+{
+  "plan_id": "add_contact_v1",
+  "task_type": "add_contact",
+  "required_slots": ["contact_name", "phone_number"],
+  "max_retries_per_step": 3,
+  "stages": [
+    {
+      "stage_id": "say_name",
+      "slot_to_fill": "contact_name",
+      "primary_prompt_id": "add_contact.say_name",
+      "expected_input_type": "name",
+      "ui_config": { "screen": "home" },
+      "validation": {},
+      "branches": {
+        "valid_slot": { "action": "fill_slot", "next_stage": "say_number" },
+        "unrecognized": { "prompt_id": "add_contact.name_clarify", "action": "retry", "max_attempts": 3, "attempt_3_action": "modality_switch" },
+        "cancelled": { "action": "abort_task" },
+        "silent": { "timeout_ms": 4000, "prompt_id": "generic.still_there", "action": "retry" },
+        "help_request": { "prompt_id": "add_contact.say_name", "action": "replay_prompt" },
+        "repeat_request": { "action": "replay_prompt" }
+      }
+    },
+    {
+      "stage_id": "say_number",
+      "slot_to_fill": "phone_number",
+      "primary_prompt_id": "add_contact.say_number",
+      "expected_input_type": "phone_number",
+      "ui_config": { "screen": "enter_number" },
+      "validation": {},
+      "branches": {
+        "valid_slot": { "action": "fill_slot", "next_stage": "confirm_contact" },
+        "unrecognized": { "prompt_id": "add_contact.number_clarify", "action": "retry", "max_attempts": 3, "attempt_3_action": "modality_switch" },
+        "cancelled": { "action": "abort_task" },
+        "silent": { "timeout_ms": 4000, "prompt_id": "generic.still_there", "action": "retry" },
+        "help_request": { "prompt_id": "add_contact.say_number", "action": "replay_prompt" },
+        "repeat_request": { "action": "replay_prompt" }
+      }
+    },
+    {
+      "stage_id": "confirm_contact",
+      "slot_to_fill": null,
+      "primary_prompt_id": "add_contact.confirm",
+      "prompt_template_vars": ["contact_name", "phone_number"],
+      "expected_input_type": "yes_no",
+      "ui_config": { "screen": "confirm" },
+      "validation": {},
+      "branches": {
+        "confirmed": { "action": "next_stage", "next_stage": "result" },
+        "denied": { "action": "abort_task" },
+        "cancelled": { "action": "abort_task" },
+        "unrecognized": { "prompt_id": "generic.not_understood", "action": "retry", "max_attempts": 3 },
+        "help_request": { "action": "replay_prompt" },
+        "repeat_request": { "action": "replay_prompt" }
+      }
+    },
+    {
+      "stage_id": "result",
+      "slot_to_fill": null,
+      "primary_prompt_id": "add_contact.success",
+      "prompt_template_vars": ["contact_name"],
+      "expected_input_type": "tap",
+      "ui_config": { "screen": "result" },
+      "validation": {},
+      "branches": {
+        "auto_advance": { "action": "return_home" },
+        "valid_slot": { "action": "return_home" },
+        "cancelled": { "action": "return_home" }
+      }
+    }
+  ]
+}

@@ -1,0 +1,181 @@
+{
+  "plan_id": "tutorial_v1",
+  "task_type": "tutorial",
+  "required_slots": [],
+  "max_retries_per_step": 5,
+  "stages": [
+    {
+      "stage_id": "intro",
+      "slot_to_fill": null,
+      "primary_prompt_id": "tutorial.intro",
+      "expected_input_type": "none",
+      "ui_config": {
+        "screen": "tutorial_intro",
+        "show_logo": true,
+        "auto_advance_ms": 4000
+      },
+      "branches": {
+        "auto_advance": {
+          "action": "next_stage",
+          "next_stage": "tap_send"
+        }
+      }
+    },
+    {
+      "stage_id": "tap_send",
+      "slot_to_fill": null,
+      "primary_prompt_id": "tutorial.tap_send",
+      "expected_input_type": "tap",
+      "ui_config": {
+        "screen": "tutorial_home",
+        "highlight_send_button": true,
+        "show_mic": false
+      },
+      "branches": {
+        "valid_slot": {
+          "action": "next_stage",
+          "next_stage": "say_name"
+        },
+        "unrecognized": {
+          "prompt_id": "tutorial.tap_send_hint",
+          "action": "retry"
+        },
+        "silent": {
+          "timeout_ms": 5000,
+          "prompt_id": "tutorial.tap_send_hint",
+          "second_timeout_ms": 5000,
+          "fallback_action": "retry"
+        },
+        "help_request": {
+          "prompt_id": "tutorial.tap_send_hint",
+          "action": "replay_prompt"
+        },
+        "repeat_request": {
+          "action": "replay_prompt"
+        }
+      }
+    },
+    {
+      "stage_id": "say_name",
+      "slot_to_fill": null,
+      "primary_prompt_id": "tutorial.say_name",
+      "expected_input_type": "recipient_name_or_tap",
+      "ui_config": {
+        "screen": "tutorial_recipient",
+        "show_recipient_tiles": true,
+        "show_mic": true
+      },
+      "branches": {
+        "valid_slot": {
+          "action": "next_stage",
+          "next_stage": "say_amount"
+        },
+        "unrecognized": {
+          "prompt_id": "tutorial.say_name_hint",
+          "action": "retry"
+        },
+        "silent": {
+          "timeout_ms": 5000,
+          "prompt_id": "tutorial.say_name_hint",
+          "second_timeout_ms": 5000,
+          "fallback_action": "retry"
+        },
+        "help_request": {
+          "prompt_id": "tutorial.say_name_hint",
+          "action": "replay_prompt"
+        },
+        "repeat_request": {
+          "action": "replay_prompt"
+        }
+      }
+    },
+    {
+      "stage_id": "say_amount",
+      "slot_to_fill": null,
+      "primary_prompt_id": "tutorial.say_amount",
+      "expected_input_type": "amount",
+      "ui_config": {
+        "screen": "tutorial_amount",
+        "show_mic": true
+      },
+      "branches": {
+        "valid_slot": {
+          "action": "next_stage",
+          "next_stage": "say_yes"
+        },
+        "unrecognized": {
+          "prompt_id": "tutorial.say_amount_hint",
+          "action": "retry"
+        },
+        "silent": {
+          "timeout_ms": 5000,
+          "prompt_id": "tutorial.say_amount_hint",
+          "second_timeout_ms": 5000,
+          "fallback_action": "retry"
+        },
+        "help_request": {
+          "prompt_id": "tutorial.say_amount_hint",
+          "action": "replay_prompt"
+        },
+        "repeat_request": {
+          "action": "replay_prompt"
+        }
+      }
+    },
+    {
+      "stage_id": "say_yes",
+      "slot_to_fill": null,
+      "primary_prompt_id": "tutorial.say_yes",
+      "expected_input_type": "yes_no",
+      "ui_config": {
+        "screen": "tutorial_confirm",
+        "show_green_check": true,
+        "show_red_x": true,
+        "show_mic": true
+      },
+      "branches": {
+        "confirmed": {
+          "action": "next_stage",
+          "next_stage": "done"
+        },
+        "denied": {
+          "prompt_id": "tutorial.say_yes_hint",
+          "action": "retry"
+        },
+        "unrecognized": {
+          "prompt_id": "tutorial.say_yes_hint",
+          "action": "retry"
+        },
+        "silent": {
+          "timeout_ms": 5000,
+          "prompt_id": "tutorial.say_yes_hint",
+          "second_timeout_ms": 5000,
+          "fallback_action": "retry"
+        },
+        "help_request": {
+          "prompt_id": "tutorial.say_yes_hint",
+          "action": "replay_prompt"
+        },
+        "repeat_request": {
+          "action": "replay_prompt"
+        }
+      }
+    },
+    {
+      "stage_id": "done",
+      "slot_to_fill": null,
+      "primary_prompt_id": "tutorial.done",
+      "expected_input_type": "none",
+      "ui_config": {
+        "screen": "tutorial_done",
+        "show_celebration": true,
+        "auto_advance_ms": 5000
+      },
+      "branches": {
+        "auto_advance": {
+          "action": "return_home"
+        }
+      }
+    }
+  ]
+}

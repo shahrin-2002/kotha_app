@@ -1,0 +1,263 @@
+{
+  "plan_id": "recharge_v1",
+  "task_type": "recharge",
+  "required_slots": ["operator", "phone_number", "amount"],
+  "max_retries_per_step": 3,
+  "stages": [
+    {
+      "stage_id": "select_operator",
+      "slot_to_fill": "operator",
+      "primary_prompt_id": "recharge.select_operator",
+      "expected_input_type": "operator_name_or_tap",
+      "ui_config": {
+        "screen": "select_operator",
+        "show_operator_tiles": true,
+        "show_mic": true
+      },
+      "branches": {
+        "valid_slot": {
+          "action": "fill_slot",
+          "next_stage": "enter_number"
+        },
+        "ambiguous": {
+          "prompt_id": "recharge.operator_clarify",
+          "action": "retry"
+        },
+        "unrecognized": {
+          "prompt_id": "generic.not_understood",
+          "action": "retry",
+          "attempt_2_prompt_id": "generic.not_understood_2",
+          "attempt_3_action": "modality_switch",
+          "modality_switch_prompt_id": "generic.tap_icon_fallback"
+        },
+        "cancelled": {
+          "prompt_id": "generic.cancelled",
+          "action": "abort_task"
+        },
+        "silent": {
+          "timeout_ms": 4000,
+          "prompt_id": "generic.still_there",
+          "second_timeout_ms": 4000,
+          "fallback_action": "modality_switch",
+          "modality_switch_prompt_id": "generic.tap_icon_fallback"
+        },
+        "help_request": {
+          "prompt_id": "recharge.operator_help",
+          "action": "replay_prompt"
+        },
+        "repeat_request": {
+          "action": "replay_prompt"
+        },
+        "change_request": {
+          "action": "replay_prompt"
+        }
+      }
+    },
+    {
+      "stage_id": "enter_number",
+      "slot_to_fill": "phone_number",
+      "primary_prompt_id": "recharge.enter_number",
+      "expected_input_type": "phone_number",
+      "ui_config": {
+        "screen": "enter_number",
+        "show_numpad": true,
+        "show_mic": true
+      },
+      "branches": {
+        "valid_slot": {
+          "action": "fill_slot",
+          "next_stage": "enter_amount"
+        },
+        "ambiguous": {
+          "prompt_id": "recharge.number_clarify",
+          "action": "retry"
+        },
+        "unrecognized": {
+          "prompt_id": "generic.not_understood",
+          "action": "retry",
+          "attempt_2_prompt_id": "generic.not_understood_2",
+          "attempt_3_action": "modality_switch",
+          "modality_switch_prompt_id": "generic.tap_icon_fallback"
+        },
+        "cancelled": {
+          "prompt_id": "generic.cancelled",
+          "action": "abort_task"
+        },
+        "silent": {
+          "timeout_ms": 4000,
+          "prompt_id": "generic.still_there",
+          "second_timeout_ms": 4000,
+          "fallback_action": "modality_switch"
+        },
+        "help_request": {
+          "prompt_id": "recharge.number_help",
+          "action": "replay_prompt"
+        },
+        "repeat_request": {
+          "action": "replay_prompt"
+        },
+        "change_request": {
+          "clear_slot": "operator",
+          "next_stage": "select_operator"
+        }
+      }
+    },
+    {
+      "stage_id": "enter_amount",
+      "slot_to_fill": "amount",
+      "primary_prompt_id": "recharge.how_much",
+      "expected_input_type": "amount",
+      "ui_config": {
+        "screen": "enter_amount",
+        "show_mic": true
+      },
+      "validation": {
+        "min": 10,
+        "max": 1000,
+        "exceeds_balance_prompt_id": "recharge.insufficient_balance",
+        "below_min_prompt_id": "recharge.below_minimum",
+        "above_max_prompt_id": "recharge.above_maximum"
+      },
+      "branches": {
+        "valid_slot": {
+          "action": "fill_slot",
+          "next_stage": "confirm"
+        },
+        "ambiguous": {
+          "prompt_id": "recharge.amount_clarify",
+          "action": "retry"
+        },
+        "unrecognized": {
+          "prompt_id": "generic.not_understood",
+          "action": "retry",
+          "attempt_2_prompt_id": "generic.not_understood_2",
+          "attempt_3_action": "modality_switch",
+          "modality_switch_prompt_id": "generic.tap_icon_fallback"
+        },
+        "cancelled": {
+          "prompt_id": "generic.cancelled",
+          "action": "abort_task"
+        },
+        "silent": {
+          "timeout_ms": 4000,
+          "prompt_id": "generic.still_there",
+          "second_timeout_ms": 4000,
+          "fallback_action": "modality_switch"
+        },
+        "help_request": {
+          "prompt_id": "recharge.how_much",
+          "action": "replay_prompt"
+        },
+        "repeat_request": {
+          "action": "replay_prompt"
+        },
+        "change_request": {
+          "clear_slot": "phone_number",
+          "next_stage": "enter_number"
+        }
+      }
+    },
+    {
+      "stage_id": "confirm",
+      "slot_to_fill": null,
+      "primary_prompt_id": "recharge.confirm_readback",
+      "prompt_template_vars": ["operator", "phone_number", "amount"],
+      "expected_input_type": "yes_no",
+      "ui_config": {
+        "screen": "confirm",
+        "show_green_check": true,
+        "show_red_x": true,
+        "show_mic": true
+      },
+      "branches": {
+        "confirmed": {
+          "action": "next_stage",
+          "next_stage": "pin_entry"
+        },
+        "denied": {
+          "prompt_id": "recharge.what_to_change",
+          "action": "retry",
+          "sub_branches": {
+            "change_operator": {
+              "clear_slot": "operator",
+              "next_stage": "select_operator"
+            },
+            "change_number": {
+              "clear_slot": "phone_number",
+              "next_stage": "enter_number"
+            },
+            "change_amount": {
+              "clear_slot": "amount",
+              "next_stage": "enter_amount"
+            },
+            "cancel": {
+              "action": "abort_task"
+            }
+          }
+        },
+        "unrecognized": {
+          "prompt_id": "generic.not_understood",
+          "action": "retry",
+          "attempt_3_action": "modality_switch"
+        },
+        "cancelled": {
+          "prompt_id": "generic.cancelled",
+          "action": "abort_task"
+        },
+        "silent": {
+          "timeout_ms": 4000,
+          "prompt_id": "generic.still_there"
+        },
+        "help_request": {
+          "action": "replay_prompt"
+        },
+        "repeat_request": {
+          "action": "replay_prompt"
+        }
+      }
+    },
+    {
+      "stage_id": "pin_entry",
+      "slot_to_fill": null,
+      "primary_prompt_id": "recharge.enter_pin",
+      "expected_input_type": "pin",
+      "ui_config": {
+        "screen": "pin_pad",
+        "show_large_numpad": true,
+        "show_mic": false
+      },
+      "branches": {
+        "valid_slot": {
+          "action": "execute_transaction",
+          "next_stage": "result"
+        },
+        "denied": {
+          "prompt_id": "recharge.wrong_pin",
+          "action": "retry",
+          "max_attempts": 3,
+          "final_failure_action": "abort_task"
+        },
+        "cancelled": {
+          "prompt_id": "generic.cancelled",
+          "action": "abort_task"
+        }
+      }
+    },
+    {
+      "stage_id": "result",
+      "slot_to_fill": null,
+      "primary_prompt_id": "recharge.success",
+      "prompt_template_vars": ["operator", "phone_number", "amount", "new_balance"],
+      "expected_input_type": "none",
+      "ui_config": {
+        "screen": "result",
+        "auto_advance_ms": 5000
+      },
+      "branches": {
+        "auto_advance": {
+          "action": "return_home"
+        }
+      }
+    }
+  ]
+}

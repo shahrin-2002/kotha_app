@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Env / secrets
+.env
+server/.env
+**/.env
+
+# Build outputs
+client/dist/
+client/android/app/build/
+client/android/build/
+client/android/.gradle/
+client/android/captures/
+client/android/local.properties
+
+# Server data (SQLite is re-seeded on start)
+server/data/
+
+# Logs / OS
+*.log
+.DS_Store
+Thumbs.db

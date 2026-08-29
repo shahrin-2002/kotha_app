@@ -1,0 +1,14 @@
+# Render Blueprint — deploys the Kotha Node backend as a Docker web service.
+# In Render: New → Blueprint → connect this repo → it reads this file.
+services:
+  - type: web
+    name: kotha-server
+    runtime: docker
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: ./server
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      # Set this in the Render dashboard (marked secret — not stored in git).
+      - key: OPENAI_API_KEY
+        sync: false
