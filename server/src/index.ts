@@ -51,6 +51,40 @@ const sessions = new Map<string, SessionContext>();
 
 // ── REST API ──────────────────────────────────────────────
 
+app.get("/", (_req, res) => {
+  res.type("html").send(`<!doctype html>
+<html lang="bn">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kotha API</title>
+  <style>
+    body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background:#0f172a; color:#e2e8f0; }
+    .card { text-align:center; padding:2.5rem 3rem; background:#1e293b; border-radius:16px;
+      box-shadow:0 10px 40px rgba(0,0,0,.4); max-width:420px; }
+    .logo { font-size:2.4rem; font-weight:700; margin-bottom:.25rem; }
+    .status { display:inline-flex; align-items:center; gap:.5rem; margin:1rem 0;
+      background:#064e3b; color:#6ee7b7; padding:.4rem .9rem; border-radius:999px; font-weight:600; }
+    .dot { width:.6rem; height:.6rem; border-radius:50%; background:#34d399; box-shadow:0 0 0 0 rgba(52,211,153,.7);
+      animation:pulse 1.8s infinite; }
+    @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(52,211,153,.6)} 70%{box-shadow:0 0 0 10px rgba(52,211,153,0)} 100%{box-shadow:0 0 0 0 rgba(52,211,153,0)} }
+    .sub { color:#94a3b8; font-size:.95rem; line-height:1.5; }
+    code { background:#0f172a; padding:.15rem .4rem; border-radius:6px; color:#93c5fd; font-size:.85rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">কোথা</div>
+    <div class="status"><span class="dot"></span> API চালু আছে · running</div>
+    <p class="sub">This is the Kotha backend API server.<br/>Use the mobile app to interact with it.</p>
+    <p class="sub">Health check: <code>/api/health</code></p>
+  </div>
+</body>
+</html>`);
+});
+
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", bangla_test: "কোথা চালু আছে" });
 });
