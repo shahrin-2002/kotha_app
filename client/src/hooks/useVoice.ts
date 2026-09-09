@@ -128,9 +128,9 @@ export function useVoice() {
     const analyser = analyserRef.current;
     const stream = mediaStreamRef.current;
     const dataArray = new Uint8Array(analyser.fftSize);
-    const START_THRESHOLD = 6;
+    const START_THRESHOLD = 4;   // lower = triggers on quieter speech (no need to shout)
     const STOP_THRESHOLD = 2;
-    const SILENCE_DURATION = 1000;
+    const SILENCE_DURATION = 1200;
     let frameCount = 0;
 
     // Check stream health
@@ -213,7 +213,12 @@ export function useVoice() {
     addLog("🎤 requesting mic...");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true },
+        audio: {
+          echoCancellation: true,   // cancel speaker echo (esp. on phone)
+          noiseSuppression: true,   // suppress background noise
+          autoGainControl: true,    // boost quiet speech so user needn't speak loudly
+          channelCount: 1,
+        },
       });
       mediaStreamRef.current = stream;
       const trackLabel = stream.getAudioTracks()[0]?.label ?? "unknown";

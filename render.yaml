@@ -9,6 +9,8 @@ services:
     plan: free
     healthCheckPath: /api/health
     envVars:
-      # Set this in the Render dashboard (marked secret — not stored in git).
+      # Set these in the Render dashboard (marked secret — not stored in git).
       - key: OPENAI_API_KEY
+        sync: false
+      - key: CARTESIA_API_KEY
         sync: false

@@ -89,6 +89,51 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", bangla_test: "কোথা চালু আছে" });
 });
 
+const CARTESIA_API_KEY = process.env.CARTESIA_API_KEY ?? "";
+// Bengali voice on Cartesia Sonic-3 (default: "Pooja - Everyday Assistant").
+const CARTESIA_VOICE_ID = process.env.CARTESIA_VOICE_ID ?? "59ba7dee-8f9a-432f-a6c0-ffb33666b654";
+if (CARTESIA_API_KEY) console.log("Cartesia Bangla TTS enabled (sonic-3)");
+
+async function cartesiaTTS(text: string): Promise<Buffer | null> {
+  if (!CARTESIA_API_KEY) return null;
+  try {
+    const r = await fetch("https://api.cartesia.ai/tts/bytes", {
+      method: "POST",
+      headers: {
+        "X-API-Key": CARTESIA_API_KEY,
+        "Cartesia-Version": "2024-11-13",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model_id: "sonic-3",
+        transcript: text,
+        voice: { mode: "id", id: CARTESIA_VOICE_ID },
+        language: "bn",
+        output_format: { container: "mp3", sample_rate: 44100, bit_rate: 128000 },
+      }),
+    });
+    if (!r.ok) {
+      console.error("[Cartesia TTS]", r.status, (await r.text()).slice(0, 120));
+      return null;
+    }
+    return Buffer.from(await r.arrayBuffer());
+  } catch (e: any) {
+    console.error("[Cartesia TTS error]", e.message);
+    return null;
+  }
+}
+
+async function googleTTS(text: string): Promise<Buffer | null> {
+  try {
+    const url = `https://translate.googleapis.com/translate_tts?ie=UTF-8&tl=bn&client=gtx&q=${encodeURIComponent(text)}`;
+    const response = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (!response.ok) return null;
+    return Buffer.from(await response.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
 app.get("/api/tts", async (req, res) => {
   const text = req.query.text as string;
   if (!text) {
@@ -96,18 +141,15 @@ app.get("/api/tts", async (req, res) => {
     return;
   }
   try {
-    const url = `https://translate.googleapis.com/translate_tts?ie=UTF-8&tl=bn&client=gtx&q=${encodeURIComponent(text)}`;
-    const response = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-    });
-    if (!response.ok) {
-      res.status(502).json({ error: "TTS fetch failed" });
+    // Prefer Cartesia Sonic-3 (natural Bangla); fall back to Google Translate TTS.
+    const audio = (await cartesiaTTS(text)) ?? (await googleTTS(text));
+    if (!audio) {
+      res.status(502).json({ error: "TTS failed" });
       return;
     }
     res.set("Content-Type", "audio/mpeg");
     res.set("Cache-Control", "public, max-age=86400");
-    const buffer = await response.arrayBuffer();
-    res.send(Buffer.from(buffer));
+    res.send(audio);
   } catch {
     res.status(502).json({ error: "TTS error" });
   }
