@@ -52,6 +52,9 @@ export function useVoice() {
   }, []);
 
   useEffect(() => {
+    // Android WebView (Capacitor) has no window.speechSynthesis — the app uses
+    // server TTS (/api/tts) instead, so this browser-only preload is optional.
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
     const loadVoices = () => { window.speechSynthesis.getVoices(); };
     loadVoices();
     window.speechSynthesis.addEventListener("voiceschanged", loadVoices);
@@ -322,7 +325,7 @@ export function useVoice() {
   }, [stopVAD, startVAD, initMic, teardownMic, addLog, speakWithServerTTS]);
 
   const stopSpeaking = useCallback(() => {
-    window.speechSynthesis.cancel();
+    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current = null;

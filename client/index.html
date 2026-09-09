@@ -7,6 +7,27 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;600;700&display=swap" rel="stylesheet" />
     <title>কোথা — অনুশীলন</title>
+    <script>
+      // On-device error overlay: if startup JS throws, show it on screen instead of a white page.
+      (function () {
+        function show(msg) {
+          var el = document.getElementById('boot-error');
+          if (!el) {
+            el = document.createElement('pre');
+            el.id = 'boot-error';
+            el.style.cssText = 'position:fixed;inset:0;margin:0;padding:16px;background:#7f1d1d;color:#fff;font:13px/1.5 monospace;white-space:pre-wrap;overflow:auto;z-index:99999';
+            document.body && document.body.appendChild(el);
+          }
+          el.textContent = 'App error:\n' + msg;
+        }
+        window.addEventListener('error', function (e) {
+          show((e.message || e.error) + '\n' + (e.filename || '') + ':' + (e.lineno || ''));
+        });
+        window.addEventListener('unhandledrejection', function (e) {
+          show('Promise: ' + ((e.reason && (e.reason.stack || e.reason.message)) || e.reason));
+        });
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
