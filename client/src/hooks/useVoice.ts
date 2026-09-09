@@ -4,7 +4,10 @@ const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
 type VoiceState = "idle" | "listening" | "speaking" | "error";
 
-function splitText(text: string, maxLen = 180): string[] {
+// Send the whole prompt as ONE request so a prompt is always a single voice
+// (chunking caused Cartesia/Google to alternate mid-sentence). Cartesia Sonic
+// handles long transcripts fine; only very long text is split as a safety net.
+function splitText(text: string, maxLen = 2000): string[] {
   const chunks: string[] = [];
   let remaining = text;
   while (remaining.length > 0) {
@@ -267,8 +270,12 @@ export function useVoice() {
     activatedRef.current = true;
     setErrorMsg("");
     addLog("🟢 activated");
-    // Mic will be initialized after TTS finishes to avoid Intel SST conflicts
-  }, [addLog]);
+    // Warm up the mic immediately so the first listen (right after the welcome
+    // prompt) starts instantly instead of after a cold getUserMedia init.
+    if (!micReadyRef.current) {
+      await initMic();
+    }
+  }, [addLog, initMic]);
 
   const stopListening = useCallback(() => {
     activatedRef.current = false;
@@ -311,23 +318,21 @@ export function useVoice() {
     await speakWithServerTTS(text);
 
     isSpeakingRef.current = false;
-    addLog("🔊 TTS done → starting VAD");
+    addLog("🔊 TTS done → listening");
 
     if (activatedRef.current) {
-      // Tear down old mic and get a fresh one — Intel SST can lock up
-      // if mic was open while audio played
-      if (micReadyRef.current) {
-        teardownMic();
-        await new Promise(r => setTimeout(r, 200));
+      // Keep the mic warm — do NOT tear it down and re-create it here.
+      // Re-initializing getUserMedia each turn added a ~1s gap where the user's
+      // reply was missed. The mic stays open; we just resume VAD instantly.
+      if (!micReadyRef.current) {
+        const ok = await initMic();
+        if (!ok) return;
       }
-      const ok = await initMic();
-      if (ok) {
-        await startVAD();
-      }
+      await startVAD();
     } else {
       setVoiceState("idle");
     }
-  }, [stopVAD, startVAD, initMic, teardownMic, addLog, speakWithServerTTS]);
+  }, [stopVAD, startVAD, initMic, addLog, speakWithServerTTS]);
 
   const stopSpeaking = useCallback(() => {
     if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();

@@ -96,31 +96,31 @@ if (CARTESIA_API_KEY) console.log("Cartesia Bangla TTS enabled (sonic-3)");
 
 async function cartesiaTTS(text: string): Promise<Buffer | null> {
   if (!CARTESIA_API_KEY) return null;
-  try {
-    const r = await fetch("https://api.cartesia.ai/tts/bytes", {
-      method: "POST",
-      headers: {
-        "X-API-Key": CARTESIA_API_KEY,
-        "Cartesia-Version": "2024-11-13",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model_id: "sonic-3",
-        transcript: text,
-        voice: { mode: "id", id: CARTESIA_VOICE_ID },
-        language: "bn",
-        output_format: { container: "mp3", sample_rate: 44100, bit_rate: 128000 },
-      }),
-    });
-    if (!r.ok) {
-      console.error("[Cartesia TTS]", r.status, (await r.text()).slice(0, 120));
-      return null;
+  // Retry so a transient failure doesn't drop us to the (different) Google voice.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const r = await fetch("https://api.cartesia.ai/tts/bytes", {
+        method: "POST",
+        headers: {
+          "X-API-Key": CARTESIA_API_KEY,
+          "Cartesia-Version": "2024-11-13",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model_id: "sonic-3",
+          transcript: text,
+          voice: { mode: "id", id: CARTESIA_VOICE_ID },
+          language: "bn",
+          output_format: { container: "mp3", sample_rate: 44100, bit_rate: 128000 },
+        }),
+      });
+      if (r.ok) return Buffer.from(await r.arrayBuffer());
+      console.error(`[Cartesia TTS] attempt ${attempt} status ${r.status}: ${(await r.text()).slice(0, 120)}`);
+    } catch (e: any) {
+      console.error(`[Cartesia TTS] attempt ${attempt} error:`, e.message);
     }
-    return Buffer.from(await r.arrayBuffer());
-  } catch (e: any) {
-    console.error("[Cartesia TTS error]", e.message);
-    return null;
   }
+  return null;
 }
 
 async function googleTTS(text: string): Promise<Buffer | null> {
