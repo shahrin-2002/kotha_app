@@ -143,9 +143,12 @@ app.post("/api/stt", async (req, res) => {
       file,
       model: "gpt-4o-transcribe",
       language: "bn",
+      // Bias the model toward Bangla script + this app's domain to reduce language drift.
+      prompt: "এটি বাংলা ভাষায় মোবাইল ব্যাংকিং কথোপকথন। ব্যবহারকারী বাংলায় কমান্ড বলছেন যেমন টাকা পাঠাও, ক্যাশ আউট, রিচার্জ, বিল দাও, ব্যালেন্স।",
+      temperature: 0,
     });
 
-    // Filter Whisper hallucinations — when given silence, it repeats junk
+    // Filter hallucinations — when given silence/noise, the model repeats junk
     const t = (transcription.text ?? "").trim();
     const isHallucination = t.length > 60 || t.includes("কথোপকথন") || t.includes("সাবটাইটেল") || t.includes("subscribe");
     if (isHallucination) {
@@ -154,8 +157,18 @@ app.post("/api/stt", async (req, res) => {
       return;
     }
 
-    console.log(`[STT] "${transcription.text}"`);
-    res.json({ transcript: transcription.text ?? "" });
+    // Strictly Bangla: reject transcripts containing wrong scripts (Arabic, Devanagari,
+    // CJK, Cyrillic, Hangul, Thai). The model sometimes drifts to phonetically similar
+    // scripts on short/quiet clips — drop those so garbage never reaches the app.
+    const WRONG_SCRIPT = /[؀-ۿऀ-ॿ一-鿿Ѐ-ӿ가-힯฀-๿]/;
+    if (WRONG_SCRIPT.test(t)) {
+      console.log(`[STT] non-Bangla script rejected: "${t.substring(0, 50)}"`);
+      res.json({ transcript: "" });
+      return;
+    }
+
+    console.log(`[STT] "${t}"`);
+    res.json({ transcript: t });
   } catch (err: any) {
     console.error("[STT error]", err.message);
     res.status(500).json({ error: "STT failed", detail: err.message });
