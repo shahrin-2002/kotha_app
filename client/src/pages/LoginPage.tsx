@@ -25,20 +25,19 @@ interface Props {
   onLogin: (sessionData: SessionData) => void;
 }
 
-type Stage = "loading" | "enter" | "working" | "success" | "error";
+type Stage = "loading" | "biometric" | "create" | "working" | "success" | "error";
 
-// Everything is auto-generated and hidden behind the fingerprint — the user types nothing.
+// Hidden secret tied to the account behind the fingerprint — user never sees/types it.
 function gen4(): string { return String(Math.floor(1000 + Math.random() * 9000)); }
-function genPhone(): string {
-  let d = "01";
-  for (let i = 0; i < 9; i++) d += Math.floor(Math.random() * 10);
-  return d;
-}
 
 export function LoginPage({ onLogin }: Props) {
   const [stage, setStage] = useState<Stage>("loading");
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
   const [error, setError] = useState("");
   const [welcomeName, setWelcomeName] = useState("");
+  const [bioAvailable, setBioAvailable] = useState(false);
+  const [hasAccount, setHasAccount] = useState(false);
   const onLoginRef = useRef(onLogin);
   onLoginRef.current = onLogin;
   const triedRef = useRef(false);
@@ -52,9 +51,14 @@ export function LoginPage({ onLogin }: Props) {
   }, []);
 
   useEffect(() => {
-    if (stage === "enter" && spokenRef.current !== "enter") {
-      spokenRef.current = "enter";
-      speak("প্রবেশ করতে আঙুলের ছাপ দিন।");
+    const lines: Record<string, string> = {
+      biometric: "প্রবেশ করতে আঙুলের ছাপ দিন।",
+      create: "নতুন একাউন্ট খুলতে আপনার নাম ও মোবাইল নম্বর দিন, তারপর আঙুলের ছাপ দিন।",
+    };
+    const line = lines[stage];
+    if (line && spokenRef.current !== stage) {
+      spokenRef.current = stage;
+      speak(line);
     }
   }, [stage, speak]);
 
@@ -65,56 +69,79 @@ export function LoginPage({ onLogin }: Props) {
     setTimeout(() => onLoginRef.current(session), 1300);
   }, [speak]);
 
-  const authenticate = useCallback(async () => {
+  // Login to the account already linked on this device (returning user)
+  const biometricLogin = useCallback(async () => {
     setError("");
+    try {
+      await NativeBiometric.verifyIdentity({ reason: "প্রবেশ করুন", title: "কথা", subtitle: "আঙুলের ছাপ দিন" });
+      const creds = await NativeBiometric.getCredentials({ server: BIO_SERVER });
+      const res = await fetch(`${API_BASE}/api/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: creds.username, pin: creds.password }),
+      });
+      if (!res.ok) { setError("একাউন্ট পাওয়া যায়নি। নতুন একাউন্ট খুলুন।"); setStage("create"); return; }
+      finish(await res.json());
+    } catch {
+      setError("আঙুলের ছাপ মেলেনি। আবার চেষ্টা করুন।");
+    }
+  }, [finish]);
+
+  // Create a new account (name + mobile), link the fingerprint, save to DB
+  const createAccount = useCallback(async () => {
+    setError("");
+    const digits = phone.replace(/\D/g, "");
+    if (!name.trim() || digits.length !== 11 || !digits.startsWith("01")) {
+      setError("নাম ও সঠিক ১১ সংখ্যার মোবাইল নম্বর দিন।");
+      return;
+    }
     setStage("working");
     try {
-      // 1) real fingerprint check
-      await NativeBiometric.verifyIdentity({ reason: "প্রবেশ করুন", title: "কথা", subtitle: "আঙুলের ছাপ দিন" });
-
-      // 2) existing account on this device? → log in
-      try {
-        const creds = await NativeBiometric.getCredentials({ server: BIO_SERVER });
-        if (creds?.username && creds?.password) {
-          const res = await fetch(`${API_BASE}/api/login`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ phone: creds.username, pin: creds.password }),
-          });
-          if (res.ok) { finish(await res.json()); return; }
-        }
-      } catch { /* no linked account yet */ }
-
-      // 3) first time on this device → create a hidden account behind the fingerprint
-      const phone = genPhone();
+      if (bioAvailable) {
+        await NativeBiometric.verifyIdentity({ reason: "একাউন্ট নিশ্চিত করুন", title: "কথা", subtitle: "আঙুলের ছাপ দিন" });
+      }
       const secret = gen4();
       const res = await fetch(`${API_BASE}/api/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "গ্রাহক", phone, pin: secret }),
+        body: JSON.stringify({ name: name.trim(), phone: digits, pin: secret }),
       });
-      if (!res.ok) { setError("সার্ভারে সমস্যা। আবার চেষ্টা করুন।"); setStage("enter"); return; }
-      try { await NativeBiometric.setCredentials({ username: phone, password: secret, server: BIO_SERVER }); } catch { /* ignore */ }
-      finish(await res.json());
+      const data = await res.json();
+      if (!res.ok) { setError(data.error ?? "একাউন্ট তৈরি ব্যর্থ।"); setStage("create"); return; }
+      if (bioAvailable) {
+        try { await NativeBiometric.setCredentials({ username: digits, password: secret, server: BIO_SERVER }); } catch { /* ignore */ }
+      }
+      finish(data);
     } catch {
-      setError("আঙুলের ছাপ মেলেনি। আবার চেষ্টা করুন।");
-      setStage("enter");
+      setError("আঙুলের ছাপ প্রয়োজন। আবার চেষ্টা করুন।");
+      setStage("create");
     }
-  }, [finish]);
+  }, [name, phone, bioAvailable, finish]);
 
-  // Detect biometric availability on mount, then auto-prompt once
+  // On mount: is a fingerprint account already linked on this device?
   useEffect(() => {
     (async () => {
       let available = false;
       try { available = !!(await NativeBiometric.isAvailable()).isAvailable; } catch { available = false; }
-      setStage("enter");
-      if (available && !triedRef.current) {
-        triedRef.current = true;
-        // slight delay so the screen renders before the OS dialog
-        setTimeout(() => authenticate(), 400);
+      setBioAvailable(available);
+      let linked = false;
+      if (available) {
+        try {
+          const creds = await NativeBiometric.getCredentials({ server: BIO_SERVER });
+          linked = !!(creds?.username && creds?.password);
+        } catch { linked = false; }
+      }
+      setHasAccount(linked);
+      if (linked) {
+        setStage("biometric");
+        if (!triedRef.current) { triedRef.current = true; setTimeout(() => biometricLogin(), 400); }
+      } else {
+        setStage("create");
       }
     })();
-  }, [authenticate]);
+  }, [biometricLogin]);
+
+  // ── UI ──────────────────────────────────────────────────
 
   if (stage === "loading" || stage === "working") {
     return (
@@ -122,7 +149,7 @@ export function LoginPage({ onLogin }: Props) {
         <div className="login-header">কথা</div>
         <div className="fingerprint-card">
           <div className="fingerprint-icon scanning">🔒</div>
-          <div className="fingerprint-label">{stage === "working" ? "যাচাই হচ্ছে..." : "লোড হচ্ছে..."}</div>
+          <div className="fingerprint-label">{stage === "working" ? "প্রক্রিয়া চলছে..." : "লোড হচ্ছে..."}</div>
         </div>
       </div>
     );
@@ -140,17 +167,43 @@ export function LoginPage({ onLogin }: Props) {
     );
   }
 
-  // enter stage — single fingerprint button, nothing to type
+  if (stage === "biometric") {
+    return (
+      <div className="page login-page">
+        <div className="login-header">কথা</div>
+        <div className="login-subtitle">আপনার একাউন্টে প্রবেশ করুন</div>
+        <div className="fingerprint-card">
+          <div className="fingerprint-icon scanning">🔒</div>
+          <div className="fingerprint-label">আঙুলের ছাপ দিন</div>
+          {error && <div style={{ color: "var(--danger)", marginTop: "0.5rem" }}>{error}</div>}
+          <button className="btn btn-confirm" style={{ marginTop: "1rem", width: "100%", maxWidth: 300 }} onClick={biometricLogin}>
+            👆 আঙুলের ছাপ দিন
+          </button>
+          <button className="fingerprint-touch" style={{ marginTop: "0.7rem", opacity: 0.85 }} onClick={() => { setError(""); setName(""); setPhone(""); setStage("create"); }}>
+            নতুন একাউন্ট খুলুন
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // create stage
   return (
     <div className="page login-page">
       <div className="login-header">কথা</div>
-      <div className="login-subtitle">আঙুলের ছাপ দিয়ে প্রবেশ করুন</div>
-      <div className="fingerprint-card">
-        <div className="fingerprint-icon waiting">👆</div>
-        {error && <div style={{ color: "var(--danger)", margin: "0.5rem 0" }}>{error}</div>}
-        <button className="btn btn-confirm" style={{ width: "100%", maxWidth: 300, marginTop: "0.5rem" }} onClick={authenticate}>
-          👆 আঙুলের ছাপ দিন
+      <div className="login-subtitle">নতুন একাউন্ট খুলুন</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", width: "100%", maxWidth: 340 }}>
+        <input className="login-input" type="text" placeholder="আপনার নাম" value={name} onChange={(e) => setName(e.target.value)} />
+        <input className="login-input" type="tel" inputMode="numeric" maxLength={11} placeholder="মোবাইল নম্বর (০১...)" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))} />
+        {error && <div style={{ color: "var(--danger)", textAlign: "center" }}>{error}</div>}
+        <button className="btn btn-confirm" style={{ width: "100%" }} onClick={createAccount}>
+          👆 আঙুলের ছাপ দিয়ে একাউন্ট খুলুন
         </button>
+        {hasAccount && (
+          <button className="fingerprint-touch" style={{ opacity: 0.85 }} onClick={() => { setError(""); setStage("biometric"); }}>
+            একাউন্ট আছে? আঙুলের ছাপ দিয়ে প্রবেশ করুন
+          </button>
+        )}
       </div>
     </div>
   );
