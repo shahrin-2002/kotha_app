@@ -4,98 +4,164 @@ import { NativeBiometric } from "capacitor-native-biometric";
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 const BIO_SERVER = "ai.customgpt.kotha";
 
-interface Participant {
-  id: string;
-  name: string;
-  phone?: string;
-  balance: number;
-}
-
+interface Participant { id: string; name: string; phone?: string; balance: number; }
 interface SessionData {
-  session_id: string;
-  participant: Participant;
-  recipients: any[];
-  agents: any[];
-  prompt_text: string;
-  prompt_id: string;
-  ui_update: any;
+  session_id: string; participant: Participant; recipients: any[]; agents: any[];
+  prompt_text: string; prompt_id: string; ui_update: any;
 }
+interface Props { onLogin: (s: SessionData) => void; }
 
-interface Props {
-  onLogin: (sessionData: SessionData) => void;
+type Stage = "loading" | "landing" | "create" | "working" | "success";
+
+const BN2A: Record<string, string> = { "০":"0","১":"1","২":"2","৩":"3","৪":"4","৫":"5","৬":"6","৭":"7","৮":"8","৯":"9" };
+function toDigits(s: string): string {
+  return s.replace(/[০-৯]/g, (d) => BN2A[d] ?? d).replace(/\D/g, "");
 }
-
-type Stage = "loading" | "landing" | "create" | "working" | "success" | "error";
-
 function gen4(): string { return String(Math.floor(1000 + Math.random() * 9000)); }
+const wantsCreate = (t: string) => /(নতুন|খুল|নাই|নেই|তৈরি|রেজিস্ট|create|new|no)/i.test(t);
+const wantsLogin = (t: string) => /(লগইন|লগ\s*ইন|প্রবেশ|আছে|ঢুক|পুরান|আগের|login|yes)/i.test(t);
 
 export function LoginPage({ onLogin }: Props) {
   const [stage, setStage] = useState<Stage>("loading");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [error, setError] = useState("");
+  const [status, setStatus] = useState("");
   const [welcomeName, setWelcomeName] = useState("");
   const [bioAvailable, setBioAvailable] = useState(false);
   const onLoginRef = useRef(onLogin);
   onLoginRef.current = onLogin;
-  const spokenRef = useRef("");
 
-  const speak = useCallback((text: string) => {
+  const streamRef = useRef<MediaStream | null>(null);
+  const ctxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const stageRunRef = useRef("");
+  const nameRef = useRef(""); nameRef.current = name;
+  const phoneRef = useRef(""); phoneRef.current = phone;
+
+  // ── voice helpers ──────────────────────────────────────
+  const speakAsync = useCallback((text: string) => new Promise<void>((resolve) => {
     try {
-      const audio = new Audio(`${API_BASE}/api/tts?text=${encodeURIComponent(text)}`);
-      audio.play().catch(() => {});
-    } catch { /* autoplay may need first tap */ }
+      if (audioRef.current) { audioRef.current.pause(); }
+      const a = new Audio(`${API_BASE}/api/tts?text=${encodeURIComponent(text)}`);
+      audioRef.current = a;
+      a.onended = () => resolve();
+      a.onerror = () => resolve();
+      a.play().catch(() => resolve());
+    } catch { resolve(); }
+  }), []);
+
+  const ensureMic = useCallback(async () => {
+    if (streamRef.current) return true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      streamRef.current = stream;
+      const ctx = new AudioContext();
+      if (ctx.state === "suspended") await ctx.resume();
+      const src = ctx.createMediaStreamSource(stream);
+      const an = ctx.createAnalyser();
+      an.fftSize = 512;
+      src.connect(an);
+      ctxRef.current = ctx;
+      analyserRef.current = an;
+      return true;
+    } catch { return false; }
   }, []);
 
-  useEffect(() => {
-    const lines: Record<string, string> = {
-      landing: "প্রবেশ করতে আঙুলের ছাপ দিন, অথবা নতুন একাউন্ট খুলুন।",
-      create: "নতুন একাউন্ট খুলতে আপনার নাম ও মোবাইল নম্বর দিন, তারপর আঙুলের ছাপ দিন।",
+  const listenOnce = useCallback((maxMs = 6000) => new Promise<string>(async (resolve) => {
+    const ok = await ensureMic();
+    if (!ok || !streamRef.current || !analyserRef.current) { resolve(""); return; }
+    setStatus("🎤 শুনছি...");
+    const stream = streamRef.current;
+    const analyser = analyserRef.current;
+    let rec: MediaRecorder;
+    try { rec = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" }); }
+    catch { resolve(""); return; }
+    const chunks: Blob[] = [];
+    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    rec.onstop = async () => {
+      setStatus("");
+      const blob = new Blob(chunks, { type: "audio/webm" });
+      if (blob.size < 1200) { resolve(""); return; }
+      try {
+        const r = await fetch(`${API_BASE}/api/stt`, { method: "POST", headers: { "Content-Type": "audio/webm" }, body: blob });
+        const d = await r.json();
+        resolve((d.transcript || "").trim());
+      } catch { resolve(""); }
     };
-    const line = lines[stage];
-    if (line && spokenRef.current !== stage) {
-      spokenRef.current = stage;
-      speak(line);
-    }
-  }, [stage, speak]);
+    rec.start(100);
+    const data = new Uint8Array(analyser.fftSize);
+    let started = false, silenceStart = 0;
+    const t0 = Date.now();
+    let raf = 0;
+    const stop = () => { cancelAnimationFrame(raf); if (rec.state === "recording") { try { rec.stop(); } catch {} } };
+    const loop = () => {
+      analyser.getByteTimeDomainData(data);
+      let dev = 0;
+      for (let i = 0; i < data.length; i++) { const d = Math.abs(data[i] - 128); if (d > dev) dev = d; }
+      const now = Date.now();
+      if (dev > 5) { started = true; silenceStart = 0; }
+      else if (started) { if (!silenceStart) silenceStart = now; else if (now - silenceStart > 900) { stop(); return; } }
+      if (now - t0 > maxMs) { stop(); return; }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+  }), [ensureMic]);
 
+  // ── auth actions ───────────────────────────────────────
   const finish = useCallback((session: SessionData) => {
     setWelcomeName(session.participant.name);
     setStage("success");
-    speak(`স্বাগতম, ${session.participant.name}।`);
     setTimeout(() => onLoginRef.current(session), 1300);
-  }, [speak]);
+  }, []);
 
-  // Login to the account already linked on this device
+  const goCreate = useCallback(() => { setError(""); setStage("create"); }, []);
+
   const biometricLogin = useCallback(async () => {
     setError("");
+    const existing = await NativeBiometric.getCredentials({ server: BIO_SERVER }).catch(() => null);
+    if (!existing?.username || !existing?.password) {
+      setError("এই ফোনে কোনো একাউন্ট নেই। আগে একাউন্ট খুলুন।");
+      await speakAsync("এই ফোনে কোনো একাউন্ট পাওয়া যায়নি। আঙুলের ছাপ মেলেনি। অনুগ্রহ করে আগে একাউন্ট খুলুন।");
+      goCreate();
+      return;
+    }
     try {
-      const existing = await NativeBiometric.getCredentials({ server: BIO_SERVER }).catch(() => null);
-      if (!existing?.username || !existing?.password) {
-        setError("এই ফোনে কোনো একাউন্ট নেই। নতুন একাউন্ট খুলুন।");
-        return;
-      }
       await NativeBiometric.verifyIdentity({ reason: "প্রবেশ করুন", title: "কথা", subtitle: "আঙুলের ছাপ দিন" });
-      setStage("working");
-      const res = await fetch(`${API_BASE}/api/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: existing.username, pin: existing.password }),
-      });
-      if (!res.ok) { setError("একাউন্ট পাওয়া যায়নি। নতুন একাউন্ট খুলুন।"); setStage("landing"); return; }
-      finish(await res.json());
     } catch {
       setError("আঙুলের ছাপ মেলেনি। আবার চেষ্টা করুন।");
+      await speakAsync("আঙুলের ছাপ মেলেনি। আবার চেষ্টা করুন।");
+      return;
+    }
+    setStage("working");
+    try {
+      const res = await fetch(`${API_BASE}/api/login`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: existing.username, pin: existing.password }),
+      });
+      if (!res.ok) {
+        setError("একাউন্ট পাওয়া যায়নি। আগে একাউন্ট খুলুন।");
+        await speakAsync("একাউন্ট পাওয়া যায়নি। অনুগ্রহ করে আগে একাউন্ট খুলুন।");
+        goCreate();
+        return;
+      }
+      finish(await res.json());
+    } catch {
+      setError("সার্ভারে সংযোগ করা যাচ্ছে না।");
       setStage("landing");
     }
-  }, [finish]);
+  }, [speakAsync, goCreate, finish]);
 
-  // Create a new account (name + mobile), link fingerprint, save to DB
   const createAccount = useCallback(async () => {
     setError("");
-    const digits = phone.replace(/\D/g, "");
-    if (!name.trim() || digits.length !== 11 || !digits.startsWith("01")) {
+    const nm = nameRef.current.trim();
+    const digits = toDigits(phoneRef.current);
+    if (!nm || digits.length !== 11 || !digits.startsWith("01")) {
       setError("নাম ও সঠিক ১১ সংখ্যার মোবাইল নম্বর দিন।");
+      await speakAsync("নাম ও সঠিক এগারো সংখ্যার মোবাইল নম্বর দিন।");
       return;
     }
     setStage("working");
@@ -105,23 +171,48 @@ export function LoginPage({ onLogin }: Props) {
       }
       const secret = gen4();
       const res = await fetch(`${API_BASE}/api/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), phone: digits, pin: secret }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: nm, phone: digits, pin: secret }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error ?? "একাউন্ট তৈরি ব্যর্থ।"); setStage("create"); return; }
       if (bioAvailable) {
-        try { await NativeBiometric.setCredentials({ username: digits, password: secret, server: BIO_SERVER }); } catch { /* ignore */ }
+        try { await NativeBiometric.setCredentials({ username: digits, password: secret, server: BIO_SERVER }); } catch {}
       }
       finish(data);
     } catch {
       setError("আঙুলের ছাপ প্রয়োজন। আবার চেষ্টা করুন।");
       setStage("create");
     }
-  }, [name, phone, bioAvailable, finish]);
+  }, [bioAvailable, speakAsync, finish]);
 
-  // On mount: just detect availability + whether an account is linked. Do NOT auto-prompt.
+  // ── voice dialogs per screen ───────────────────────────
+  const runLanding = useCallback(async () => {
+    await speakAsync("কথায় স্বাগতম। আপনার কি একাউন্ট আছে? থাকলে বলুন লগইন। নতুন হলে বলুন নতুন একাউন্ট।");
+    const t = await listenOnce();
+    if (wantsCreate(t)) { goCreate(); return; }
+    if (wantsLogin(t)) { biometricLogin(); return; }
+    await speakAsync("বুঝতে পারিনি। নিচের বোতাম থেকে বেছে নিন।");
+  }, [speakAsync, listenOnce, goCreate, biometricLogin]);
+
+  const runCreate = useCallback(async () => {
+    await speakAsync("নতুন একাউন্ট খুলি। আপনার নাম বলুন।");
+    const n = await listenOnce();
+    if (n) setName(n);
+    await speakAsync("এবার আপনার মোবাইল নম্বর বলুন।");
+    const p = await listenOnce(8000);
+    const d = toDigits(p);
+    if (d) setPhone(d);
+    await speakAsync("তথ্য ঠিক থাকলে আঙুলের ছাপ দিন। প্রয়োজনে টাইপ করে ঠিক করুন।");
+  }, [speakAsync, listenOnce]);
+
+  // run the right voice dialog when a screen appears
+  useEffect(() => {
+    if (stage === "landing" && stageRunRef.current !== "landing") { stageRunRef.current = "landing"; runLanding(); }
+    if (stage === "create" && stageRunRef.current !== "create") { stageRunRef.current = "create"; runCreate(); }
+  }, [stage, runLanding, runCreate]);
+
+  // mount: detect biometric, then show landing
   useEffect(() => {
     (async () => {
       let available = false;
@@ -132,6 +223,7 @@ export function LoginPage({ onLogin }: Props) {
   }, []);
 
   // ── UI ──────────────────────────────────────────────────
+  const caption = status ? <div className="login-subtitle" style={{ color: "var(--primary)" }}>{status}</div> : null;
 
   if (stage === "loading" || stage === "working") {
     return (
@@ -162,35 +254,31 @@ export function LoginPage({ onLogin }: Props) {
       <div className="page login-page">
         <div className="login-header">কথা</div>
         <div className="login-subtitle">নতুন একাউন্ট খুলুন</div>
+        {caption}
         <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", width: "100%", maxWidth: 340 }}>
-          <input className="login-input" type="text" placeholder="আপনার নাম" value={name} onChange={(e) => setName(e.target.value)} />
-          <input className="login-input" type="tel" inputMode="numeric" maxLength={11} placeholder="মোবাইল নম্বর (০১...)" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))} />
+          <input className="login-input" type="text" placeholder="আপনার নাম (বলুন বা লিখুন)" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="login-input" type="tel" inputMode="numeric" maxLength={11} placeholder="মোবাইল নম্বর (বলুন বা লিখুন)" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))} />
           {error && <div style={{ color: "var(--danger)", textAlign: "center" }}>{error}</div>}
-          <button className="btn btn-confirm" style={{ width: "100%" }} onClick={createAccount}>
-            👆 আঙুলের ছাপ দিয়ে একাউন্ট খুলুন
-          </button>
-          <button className="fingerprint-touch" style={{ opacity: 0.85 }} onClick={() => { setError(""); setStage("landing"); }}>
-            ← ফিরে যান
-          </button>
+          <button className="btn btn-confirm" style={{ width: "100%" }} onClick={createAccount}>👆 আঙুলের ছাপ দিয়ে একাউন্ট খুলুন</button>
+          <button className="fingerprint-touch" style={{ opacity: 0.85 }} onClick={() => { stageRunRef.current = ""; runCreate(); }}>🎤 আবার বলুন</button>
+          <button className="fingerprint-touch" style={{ opacity: 0.7 }} onClick={() => { setError(""); setStage("landing"); }}>← ফিরে যান</button>
         </div>
       </div>
     );
   }
 
-  // landing — choose: login (fingerprint) or create account
+  // landing
   return (
     <div className="page login-page">
       <div className="login-header">কথা</div>
       <div className="login-subtitle">স্বাগতম</div>
+      {caption}
       <div style={{ display: "flex", flexDirection: "column", gap: "0.9rem", width: "100%", maxWidth: 320, alignItems: "center" }}>
-        <div className="fingerprint-icon waiting" style={{ marginBottom: "0.5rem" }}>👆</div>
+        <div className="fingerprint-icon waiting" style={{ marginBottom: "0.3rem" }}>👆</div>
         {error && <div style={{ color: "var(--danger)", textAlign: "center" }}>{error}</div>}
-        <button className="btn btn-confirm" style={{ width: "100%" }} onClick={biometricLogin}>
-          👆 আঙুলের ছাপ দিয়ে প্রবেশ করুন
-        </button>
-        <button className="btn" style={{ width: "100%", background: "var(--card-bg)", color: "var(--primary)", border: "2px solid var(--primary)" }} onClick={() => { setError(""); setName(""); setPhone(""); setStage("create"); }}>
-          ＋ নতুন একাউন্ট খুলুন
-        </button>
+        <button className="btn btn-confirm" style={{ width: "100%" }} onClick={biometricLogin}>👆 আঙুলের ছাপ দিয়ে প্রবেশ করুন</button>
+        <button className="btn" style={{ width: "100%", background: "var(--card-bg)", color: "var(--primary)", border: "2px solid var(--primary)" }} onClick={goCreate}>＋ নতুন একাউন্ট খুলুন</button>
+        <button className="fingerprint-touch" style={{ opacity: 0.8 }} onClick={() => { stageRunRef.current = ""; runLanding(); }}>🎤 আবার শুনুন</button>
       </div>
     </div>
   );
