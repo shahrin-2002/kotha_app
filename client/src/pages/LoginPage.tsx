@@ -71,7 +71,7 @@ export function LoginPage({ onLogin }: Props) {
     } catch { return false; }
   }, []);
 
-  const listenOnce = useCallback((maxMs = 6000) => new Promise<string>(async (resolve) => {
+  const listenOnce = useCallback((maxMs = 6000, silenceMs = 900) => new Promise<string>(async (resolve) => {
     const ok = await ensureMic();
     if (!ok || !streamRef.current || !analyserRef.current) { resolve(""); return; }
     setStatus("🎤 শুনছি...");
@@ -104,7 +104,7 @@ export function LoginPage({ onLogin }: Props) {
       for (let i = 0; i < data.length; i++) { const d = Math.abs(data[i] - 128); if (d > dev) dev = d; }
       const now = Date.now();
       if (dev > 5) { started = true; silenceStart = 0; }
-      else if (started) { if (!silenceStart) silenceStart = now; else if (now - silenceStart > 900) { stop(); return; } }
+      else if (started) { if (!silenceStart) silenceStart = now; else if (now - silenceStart > silenceMs) { stop(); return; } }
       if (now - t0 > maxMs) { stop(); return; }
       raf = requestAnimationFrame(loop);
     };
@@ -197,13 +197,14 @@ export function LoginPage({ onLogin }: Props) {
 
   const runCreate = useCallback(async () => {
     await speakAsync("নতুন একাউন্ট খুলি। আপনার নাম বলুন।");
-    const n = await listenOnce();
+    const n = await listenOnce(7000, 1200);
     if (n) setName(n);
-    await speakAsync("এবার আপনার মোবাইল নম্বর বলুন।");
-    const p = await listenOnce(8000);
+    // Phone numbers are recited with pauses between digit groups — allow long gaps + window
+    await speakAsync("এবার আপনার মোবাইল নম্বরটি ধীরে ধীরে বলুন।");
+    const p = await listenOnce(14000, 2500);
     const d = toDigits(p);
     if (d) setPhone(d);
-    await speakAsync("তথ্য ঠিক থাকলে আঙুলের ছাপ দিন। প্রয়োজনে টাইপ করে ঠিক করুন।");
+    await speakAsync("নাম ও নম্বর দেখে নিন। ঠিক থাকলে আঙুলের ছাপ দিন, নয়তো টাইপ করে ঠিক করুন।");
   }, [speakAsync, listenOnce]);
 
   // run the right voice dialog when a screen appears
