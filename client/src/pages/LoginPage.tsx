@@ -223,7 +223,7 @@ export function LoginPage({ onLogin }: Props) {
   if (stage === "loading") {
     return (
       <div className="page login-page">
-        <div className="login-header">কোথা</div>
+        <div className="login-header">কথা</div>
         <div className="fingerprint-label">লোড হচ্ছে...</div>
       </div>
     );
@@ -232,7 +232,7 @@ export function LoginPage({ onLogin }: Props) {
   if (stage === "error") {
     return (
       <div className="page login-page">
-        <div className="login-header">কোথা</div>
+        <div className="login-header">কথা</div>
         <div className="fingerprint-card">
           <div className="fingerprint-icon waiting">🔒</div>
           <div className="fingerprint-label" style={{ color: "var(--danger)" }}>{errorMsg}</div>
@@ -257,7 +257,7 @@ export function LoginPage({ onLogin }: Props) {
   if (stage === "scanning") {
     return (
       <div className="page login-page">
-        <div className="login-header">কোথা</div>
+        <div className="login-header">কথা</div>
         <div className="fingerprint-card">
           <div className="fingerprint-icon scanning">🔒</div>
           <div className="fingerprint-label">যাচাই হচ্ছে...</div>
@@ -269,7 +269,7 @@ export function LoginPage({ onLogin }: Props) {
   if (stage === "success") {
     return (
       <div className="page login-page">
-        <div className="login-header">কোথা</div>
+        <div className="login-header">কথা</div>
         <div className="fingerprint-card">
           <div className="fingerprint-icon success">✅</div>
           <div className="fingerprint-label">স্বাগতম, {welcomeName}!</div>
@@ -281,7 +281,7 @@ export function LoginPage({ onLogin }: Props) {
   if (stage === "skip") {
     return (
       <div className="page login-page">
-        <div className="login-header">কোথা</div>
+        <div className="login-header">কথা</div>
         <div className="login-subtitle">আঙুল ছাড়া প্রবেশ (পরীক্ষা)</div>
         <div className="login-subtitle" style={{ fontSize: "1rem", color: "var(--text-secondary)" }}>
           একটি একাউন্ট বাছুন
@@ -301,7 +301,7 @@ export function LoginPage({ onLogin }: Props) {
   if (stage === "register") {
     return (
       <div className="page login-page">
-        <div className="login-header">কোথা</div>
+        <div className="login-header">কথা</div>
         <div className="login-subtitle">আঙুলের ছাপ নিবন্ধন করুন</div>
         <div className="login-subtitle" style={{ fontSize: "1rem", color: "var(--text-secondary)" }}>
           একাউন্ট বাছুন, তারপর আঙুল রাখুন
@@ -325,7 +325,7 @@ export function LoginPage({ onLogin }: Props) {
   // stage === "login" — auto-triggers fingerprint via useEffect
   return (
     <div className="page login-page">
-      <div className="login-header">কোথা</div>
+      <div className="login-header">কথা</div>
       <div className="fingerprint-card">
         <div className="fingerprint-icon scanning">🔒</div>
         <div className="fingerprint-label">আঙুল দিন</div>

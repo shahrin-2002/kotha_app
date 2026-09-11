@@ -183,7 +183,7 @@ function App() {
     return (
       <>
         <PracticeWatermark />
-        <header className="app-header">কোথা — অনুশীলন</header>
+        <header className="app-header">কথা — অনুশীলন</header>
         <LoginPage onLogin={handleLogin} />
       </>
     );
@@ -192,7 +192,7 @@ function App() {
   return (
     <>
       <PracticeWatermark />
-      <header className="app-header">কোথা — অনুশীলন</header>
+      <header className="app-header">কথা — অনুশীলন</header>
 
       {session.error && (
         <div className="status-bar" style={{ color: "var(--danger)" }}>

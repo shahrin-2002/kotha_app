@@ -76,7 +76,7 @@ app.get("/", (_req, res) => {
 </head>
 <body>
   <div class="card">
-    <div class="logo">কোথা</div>
+    <div class="logo">কথা</div>
     <div class="status"><span class="dot"></span> API চালু আছে · running</div>
     <p class="sub">This is the Kotha backend API server.<br/>Use the mobile app to interact with it.</p>
     <p class="sub">Health check: <code>/api/health</code></p>
@@ -86,7 +86,7 @@ app.get("/", (_req, res) => {
 });
 
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", bangla_test: "কোথা চালু আছে" });
+  res.json({ status: "ok", bangla_test: "কথা চালু আছে" });
 });
 
 const CARTESIA_API_KEY = process.env.CARTESIA_API_KEY ?? "";

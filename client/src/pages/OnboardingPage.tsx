@@ -7,7 +7,7 @@ export function OnboardingPage({ onStart }: Props) {
     <div className="page">
       <div className="onboarding-card">
         <div className="onboarding-icon">👋</div>
-        <h1 className="onboarding-title">কোথা-তে স্বাগতম</h1>
+        <h1 className="onboarding-title">কথা-তে স্বাগতম</h1>
         <p className="onboarding-subtitle">
           মোবাইল ব্যাংকিং শেখার সহজ উপায়
         </p>
