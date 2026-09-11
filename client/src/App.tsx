@@ -257,6 +257,7 @@ function App() {
       {screen === "pin_pad" && (
         <PinPage
           promptText={session.promptText}
+          participantPin={String(session.participant?.pin ?? "")}
           onSubmit={handlePinSubmit}
           onCancel={handlePinCancel}
         />

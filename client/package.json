@@ -13,6 +13,7 @@
     "@capacitor/android": "^6.2.1",
     "@capacitor/cli": "^6.2.1",
     "@capacitor/core": "^6.2.1",
+    "capacitor-native-biometric": "^4.2.2",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },

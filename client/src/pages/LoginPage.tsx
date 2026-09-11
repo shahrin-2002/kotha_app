@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { NativeBiometric } from "capacitor-native-biometric";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
+const BIO_SERVER = "ai.customgpt.kotha";
 
 interface Participant {
   id: string;
   name: string;
+  phone?: string;
   balance: number;
 }
 
@@ -22,246 +25,131 @@ interface Props {
   onLogin: (sessionData: SessionData) => void;
 }
 
-function base64urlToBuffer(base64url: string): ArrayBuffer {
-  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
-  const pad = base64.length % 4 === 0 ? "" : "=".repeat(4 - (base64.length % 4));
-  const binary = atob(base64 + pad);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes.buffer;
+type Stage = "loading" | "biometric" | "form" | "working" | "success" | "error";
+
+// Hidden 4-digit secret generated per account — the user never sees or types it;
+// it lives behind the fingerprint and is submitted automatically for login + transactions.
+function genSecret(): string {
+  return String(Math.floor(1000 + Math.random() * 9000));
 }
 
 export function LoginPage({ onLogin }: Props) {
-  const [stage, setStage] = useState<"loading" | "login" | "register" | "scanning" | "success" | "error" | "skip">("loading");
-  const [participants, setParticipants] = useState<Participant[]>([]);
-  const [, setSelectedParticipant] = useState<Participant | null>(null);
+  const [stage, setStage] = useState<Stage>("loading");
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [error, setError] = useState("");
   const [welcomeName, setWelcomeName] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
+  const [bioAvailable, setBioAvailable] = useState(false);
   const onLoginRef = useRef(onLogin);
   onLoginRef.current = onLogin;
+  const bioTriedRef = useRef(false);
+  const spokenStageRef = useRef("");
 
-  const loginTriggeredRef = useRef(false);
+  const speak = useCallback((text: string) => {
+    try {
+      const audio = new Audio(`${API_BASE}/api/tts?text=${encodeURIComponent(text)}`);
+      audio.play().catch(() => {});
+    } catch { /* autoplay may be blocked before first tap */ }
+  }, []);
 
+  // Voice guidance on every step
   useEffect(() => {
-    checkAuthStatus();
-  }, []);
+    const lines: Record<string, string> = {
+      biometric: "প্রবেশ করতে আঙুলের ছাপ দিন।",
+      form: "একাউন্ট খুলতে আপনার নাম ও মোবাইল নম্বর দিন, তারপর আঙুলের ছাপ দিন।",
+    };
+    const line = lines[stage];
+    if (line && spokenStageRef.current !== stage) {
+      spokenStageRef.current = stage;
+      speak(line);
+    }
+  }, [stage, speak]);
 
-  // Auto-trigger fingerprint login once when stage becomes "login"
+  const finish = useCallback((session: SessionData) => {
+    setWelcomeName(session.participant.name);
+    setStage("success");
+    speak(`স্বাগতম, ${session.participant.name}।`);
+    setTimeout(() => onLoginRef.current(session), 1300);
+  }, [speak]);
+
+  // On mount: detect biometric + any linked account on this device
   useEffect(() => {
-    if (stage === "login" && !loginTriggeredRef.current) {
-      loginTriggeredRef.current = true;
-      speakTTS("আঙুল দিন").then(() => {
-        handleFingerprintLogin();
-      });
-    }
-  }, [stage]);
-
-  async function speakTTS(text: string) {
-    try {
-      const url = `${API_BASE}/api/tts?text=${encodeURIComponent(text)}`;
-      const audio = new Audio(url);
-      await new Promise<void>((resolve) => {
-        audio.onended = () => resolve();
-        audio.onerror = () => resolve();
-        audio.play().catch(() => resolve());
-      });
-    } catch {}
-  }
-
-  async function checkAuthStatus() {
-    try {
-      const res = await fetch(`${API_BASE}/api/auth/status`);
-      const { has_credentials } = await res.json();
-
-      // Always load participants so the "skip fingerprint" picker has accounts
-      const pRes = await fetch(`${API_BASE}/api/participants`);
-      const data = await pRes.json();
-      setParticipants(data);
-
-      if (has_credentials) {
-        setStage("login");
-      } else {
-        setStage("register");
+    (async () => {
+      let available = false;
+      try { available = !!(await NativeBiometric.isAvailable()).isAvailable; } catch { available = false; }
+      setBioAvailable(available);
+      if (available) {
+        try {
+          const creds = await NativeBiometric.getCredentials({ server: BIO_SERVER });
+          if (creds?.username && creds?.password) { setStage("biometric"); return; }
+        } catch { /* none linked */ }
       }
+      setStage("form");
+    })();
+  }, []);
+
+  const doBiometricLogin = useCallback(async () => {
+    setError("");
+    try {
+      await NativeBiometric.verifyIdentity({ reason: "প্রবেশ করুন", title: "কথা", subtitle: "আঙুলের ছাপ দিন" });
+      const creds = await NativeBiometric.getCredentials({ server: BIO_SERVER });
+      const res = await fetch(`${API_BASE}/api/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: creds.username, pin: creds.password }),
+      });
+      if (!res.ok) { setError("আবার একাউন্ট যুক্ত করুন।"); setStage("form"); return; }
+      finish(await res.json());
     } catch {
-      setErrorMsg("সার্ভারে সংযোগ করা যাচ্ছে না।");
-      setStage("error");
+      setError("আঙুলের ছাপ মেলেনি।");
     }
-  }
+  }, [finish]);
 
-  // Dev bypass: log in with a test account without fingerprint (uses /api/sessions)
-  const handleSkipLogin = useCallback(async (participant: Participant) => {
+  // Auto-trigger fingerprint on the biometric stage
+  useEffect(() => {
+    if (stage === "biometric" && !bioTriedRef.current) {
+      bioTriedRef.current = true;
+      doBiometricLogin();
+    }
+  }, [stage, doBiometricLogin]);
+
+  const submitAccount = useCallback(async () => {
+    setError("");
+    const digits = phone.replace(/\D/g, "");
+    if (!name.trim() || digits.length !== 11 || !digits.startsWith("01")) {
+      setError("নাম ও সঠিক ১১ সংখ্যার মোবাইল নম্বর দিন।");
+      return;
+    }
+    setStage("working");
     try {
-      setStage("scanning");
-      const res = await fetch(`${API_BASE}/api/sessions`, {
+      if (bioAvailable) {
+        await NativeBiometric.verifyIdentity({ reason: "একাউন্ট নিশ্চিত করুন", title: "কথা", subtitle: "আঙুলের ছাপ দিন" });
+      }
+      const secret = genSecret();
+      const res = await fetch(`${API_BASE}/api/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ participant_id: participant.id }),
+        body: JSON.stringify({ name, phone: digits, pin: secret }),
       });
-      if (!res.ok) throw new Error("session failed");
-      const sessionData: SessionData = await res.json();
-      setWelcomeName(sessionData.participant.name);
-      setStage("success");
-      setTimeout(() => onLoginRef.current(sessionData), 1000);
+      const data = await res.json();
+      if (!res.ok) { setError(data.error ?? "একাউন্ট তৈরি ব্যর্থ।"); setStage("form"); return; }
+      if (bioAvailable) {
+        try { await NativeBiometric.setCredentials({ username: digits, password: secret, server: BIO_SERVER }); } catch { /* ignore */ }
+      }
+      finish(data);
     } catch {
-      setErrorMsg("প্রবেশ ব্যর্থ হয়েছে।");
-      setStage("error");
+      setError("আঙুলের ছাপ প্রয়োজন। আবার চেষ্টা করুন।");
+      setStage("form");
     }
-  }, []);
+  }, [name, phone, bioAvailable, finish]);
 
-  const handleFingerprintLogin = useCallback(async () => {
-    try {
-      setStage("scanning");
+  // ── UI ──────────────────────────────────────────────────
 
-      const optRes = await fetch(`${API_BASE}/api/auth/login-options`, { method: "POST" });
-      const options = await optRes.json();
-
-      const credential = await navigator.credentials.get({
-        publicKey: {
-          challenge: base64urlToBuffer(options.challenge),
-          rpId: options.rpId,
-          userVerification: options.userVerification,
-          timeout: options.timeout,
-        },
-      }) as PublicKeyCredential;
-
-      const verifyRes = await fetch(`${API_BASE}/api/auth/login-verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ credential_id: credential.id }),
-      });
-
-      if (!verifyRes.ok) {
-        setErrorMsg("আঙুল চিনতে পারিনি। আবার চেষ্টা করুন।");
-        setStage("error");
-        return;
-      }
-
-      const sessionData: SessionData = await verifyRes.json();
-      setWelcomeName(sessionData.participant.name);
-      setStage("success");
-      setTimeout(() => onLoginRef.current(sessionData), 1500);
-    } catch (err: any) {
-      if (err.name === "NotAllowedError") {
-        setErrorMsg("বাতিল হয়েছে। আবার চেষ্টা করুন।");
-        setStage("error");
-        return;
-      }
-      setErrorMsg("আঙুল চিনতে পারিনি। আবার চেষ্টা করুন।");
-      setStage("error");
-    }
-  }, []);
-
-  const handleRegister = useCallback(async (participant: Participant) => {
-    try {
-      setSelectedParticipant(participant);
-      setStage("scanning");
-
-      const optRes = await fetch(`${API_BASE}/api/auth/register-options`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ participant_id: participant.id }),
-      });
-      const options = await optRes.json();
-
-      const credential = await navigator.credentials.create({
-        publicKey: {
-          challenge: base64urlToBuffer(options.challenge),
-          rp: options.rp,
-          user: {
-            ...options.user,
-            id: base64urlToBuffer(options.user.id),
-          },
-          pubKeyCredParams: options.pubKeyCredParams,
-          authenticatorSelection: options.authenticatorSelection,
-          timeout: options.timeout,
-        },
-      }) as PublicKeyCredential;
-
-      await fetch(`${API_BASE}/api/auth/register-verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          participant_id: participant.id,
-          credential_id: credential.id,
-        }),
-      });
-
-      // Now auto-login
-      const loginOptRes = await fetch(`${API_BASE}/api/auth/login-options`, { method: "POST" });
-      const loginOpts = await loginOptRes.json();
-
-      const loginCred = await navigator.credentials.get({
-        publicKey: {
-          challenge: base64urlToBuffer(loginOpts.challenge),
-          rpId: loginOpts.rpId,
-          userVerification: loginOpts.userVerification,
-          timeout: loginOpts.timeout,
-        },
-      }) as PublicKeyCredential;
-
-      const verifyRes = await fetch(`${API_BASE}/api/auth/login-verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ credential_id: loginCred.id }),
-      });
-
-      const sessionData: SessionData = await verifyRes.json();
-      setWelcomeName(sessionData.participant.name);
-      setStage("success");
-      setTimeout(() => onLoginRef.current(sessionData), 1500);
-    } catch (err: any) {
-      if (err.name === "NotAllowedError") {
-        setStage("register");
-        return;
-      }
-      setErrorMsg("আঙুলের ছাপ নিবন্ধন ব্যর্থ। আবার চেষ্টা করুন।");
-      setStage("register");
-    }
-  }, []);
-
-  if (stage === "loading") {
+  if (stage === "loading" || stage === "working") {
     return (
       <div className="page login-page">
         <div className="login-header">কথা</div>
-        <div className="fingerprint-label">লোড হচ্ছে...</div>
-      </div>
-    );
-  }
-
-  if (stage === "error") {
-    return (
-      <div className="page login-page">
-        <div className="login-header">কথা</div>
-        <div className="fingerprint-card">
-          <div className="fingerprint-icon waiting">🔒</div>
-          <div className="fingerprint-label" style={{ color: "var(--danger)" }}>{errorMsg}</div>
-          <button className="fingerprint-touch" onClick={() => {
-            setErrorMsg("");
-            loginTriggeredRef.current = false;
-            setStage("login");
-          }}>
-            👆 আবার আঙুল দিন
-          </button>
-          <button className="fingerprint-touch" style={{ marginTop: "0.75rem", opacity: 0.85 }} onClick={() => {
-            setErrorMsg("");
-            setStage("skip");
-          }}>
-            🔓 আঙুল ছাড়া প্রবেশ করুন
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (stage === "scanning") {
-    return (
-      <div className="page login-page">
-        <div className="login-header">কথা</div>
-        <div className="fingerprint-card">
-          <div className="fingerprint-icon scanning">🔒</div>
-          <div className="fingerprint-label">যাচাই হচ্ছে...</div>
-        </div>
+        <div className="fingerprint-label">{stage === "working" ? "প্রক্রিয়া চলছে..." : "লোড হচ্ছে..."}</div>
       </div>
     );
   }
@@ -278,60 +166,36 @@ export function LoginPage({ onLogin }: Props) {
     );
   }
 
-  if (stage === "skip") {
+  if (stage === "biometric") {
     return (
       <div className="page login-page">
         <div className="login-header">কথা</div>
-        <div className="login-subtitle">আঙুল ছাড়া প্রবেশ (পরীক্ষা)</div>
-        <div className="login-subtitle" style={{ fontSize: "1rem", color: "var(--text-secondary)" }}>
-          একটি একাউন্ট বাছুন
-        </div>
-        <div className="account-list">
-          {participants.map((p) => (
-            <button key={p.id} className="account-tile" onClick={() => handleSkipLogin(p)}>
-              <span className="account-avatar">👤</span>
-              <span className="account-name">{p.name}</span>
-            </button>
-          ))}
+        <div className="fingerprint-card">
+          <div className="fingerprint-icon scanning">🔒</div>
+          <div className="fingerprint-label">প্রবেশ করতে আঙুলের ছাপ দিন</div>
+          {error && <div style={{ color: "var(--danger)", marginTop: "0.5rem" }}>{error}</div>}
+          <button className="fingerprint-touch" style={{ marginTop: "1rem" }} onClick={doBiometricLogin}>
+            👆 আঙুলের ছাপ দিন
+          </button>
+          <button className="fingerprint-touch" style={{ marginTop: "0.6rem", opacity: 0.8 }} onClick={() => { setError(""); setStage("form"); }}>
+            নতুন একাউন্ট
+          </button>
         </div>
       </div>
     );
   }
 
-  if (stage === "register") {
-    return (
-      <div className="page login-page">
-        <div className="login-header">কথা</div>
-        <div className="login-subtitle">আঙুলের ছাপ নিবন্ধন করুন</div>
-        <div className="login-subtitle" style={{ fontSize: "1rem", color: "var(--text-secondary)" }}>
-          একাউন্ট বাছুন, তারপর আঙুল রাখুন
-        </div>
-        {errorMsg && <div style={{ color: "var(--danger)", textAlign: "center" }}>{errorMsg}</div>}
-        <div className="account-list">
-          {participants.map((p) => (
-            <button key={p.id} className="account-tile" onClick={() => handleRegister(p)}>
-              <span className="account-avatar">👤</span>
-              <span className="account-name">{p.name}</span>
-            </button>
-          ))}
-        </div>
-        <button className="fingerprint-touch" style={{ marginTop: "1rem", opacity: 0.85 }} onClick={() => setStage("skip")}>
-          🔓 আঙুল ছাড়া প্রবেশ করুন
-        </button>
-      </div>
-    );
-  }
-
-  // stage === "login" — auto-triggers fingerprint via useEffect
+  // form stage — name + mobile, then fingerprint
   return (
     <div className="page login-page">
       <div className="login-header">কথা</div>
-      <div className="fingerprint-card">
-        <div className="fingerprint-icon scanning">🔒</div>
-        <div className="fingerprint-label">আঙুল দিন</div>
-        {errorMsg && <div style={{ color: "var(--danger)", fontSize: "1rem", marginTop: "0.5rem" }}>{errorMsg}</div>}
-        <button className="fingerprint-touch" style={{ marginTop: "1rem", opacity: 0.85 }} onClick={() => setStage("skip")}>
-          🔓 আঙুল ছাড়া প্রবেশ করুন
+      <div className="login-subtitle">একাউন্ট খুলুন বা প্রবেশ করুন</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", width: "100%", maxWidth: 340 }}>
+        <input className="login-input" type="text" placeholder="আপনার নাম" value={name} onChange={(e) => setName(e.target.value)} />
+        <input className="login-input" type="tel" inputMode="numeric" maxLength={11} placeholder="মোবাইল নম্বর (০১...)" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))} />
+        {error && <div style={{ color: "var(--danger)", textAlign: "center" }}>{error}</div>}
+        <button className="btn btn-confirm" style={{ width: "100%" }} onClick={submitAccount}>
+          👆 আঙুলের ছাপ দিয়ে প্রবেশ করুন
         </button>
       </div>
     </div>

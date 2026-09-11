@@ -18,6 +18,8 @@ import {
   addLedgerEntry,
   saveVoiceEvent,
   createParticipant,
+  getParticipantByPhone,
+  setParticipantSecret,
   getAllParticipants,
   getMetricsForSession,
   getVoiceEventsForSession,
@@ -248,6 +250,70 @@ app.post("/api/participants", (req, res) => {
   }
   const participant = createParticipant(name, pin);
   res.json(participant);
+});
+
+// ── Account system: register + login (mobile + PIN) ──────
+
+function sessionResponse(participant: ReturnType<typeof getParticipant>) {
+  const p = participant!;
+  const session = createSession(p.id);
+  sessions.set(session.session_id, session);
+  insertSession(session.session_id, p.id);
+  logEvent(session, "session_start", { participant_name: p.name });
+  return {
+    session_id: session.session_id,
+    participant: p,
+    recipients: getRecipients(p.id),
+    agents: getAgents(),
+    prompt_text: resolvePrompt("login.welcome", { name: p.name }),
+    prompt_id: "login.welcome",
+    ui_update: {
+      screen: "home",
+      filled_slots: {},
+      show_mic: true,
+      is_modality_switched: false,
+      task_complete: false,
+      return_home: false,
+    },
+  };
+}
+
+app.post("/api/register", (req, res) => {
+  const { name, phone, pin } = req.body;
+  if (!name || !phone || !pin || String(pin).length !== 4) {
+    res.status(400).json({ error: "নাম, নম্বর এবং চার সংখ্যার পিন দিন।" });
+    return;
+  }
+  const digits = String(phone).replace(/\D/g, "");
+  if (digits.length !== 11 || !digits.startsWith("01")) {
+    res.status(400).json({ error: "১১ সংখ্যার সঠিক মোবাইল নম্বর দিন।" });
+    return;
+  }
+  const existing = getParticipantByPhone(digits);
+  if (existing) {
+    // Re-link this number to a new device/fingerprint secret (practice app — no PIN recovery).
+    setParticipantSecret(existing.id, String(pin), String(name));
+    const refreshed = getParticipant(existing.id)!;
+    res.json(sessionResponse(refreshed));
+    return;
+  }
+  const participant = createParticipant(String(name), String(pin), digits);
+  res.json(sessionResponse(participant));
+});
+
+app.post("/api/login", (req, res) => {
+  const { phone, pin } = req.body;
+  if (!phone || !pin) {
+    res.status(400).json({ error: "নম্বর এবং পিন দিন।" });
+    return;
+  }
+  const digits = String(phone).replace(/\D/g, "");
+  const participant = getParticipantByPhone(digits);
+  if (!participant || participant.pin !== String(pin)) {
+    res.status(401).json({ error: "নম্বর বা পিন সঠিক নয়।" });
+    return;
+  }
+  res.json(sessionResponse(participant));
 });
 
 // ── WebAuthn Fingerprint Auth ────────────────────────────

@@ -30,11 +30,14 @@ export async function initDatabase(): Promise<void> {
     CREATE TABLE IF NOT EXISTS participants (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      phone TEXT,
       pin TEXT NOT NULL DEFAULT '1234',
       balance INTEGER NOT NULL DEFAULT 5000,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
+  // Migration for older DBs that lack the phone column (no-op if it already exists)
+  try { db.run("ALTER TABLE participants ADD COLUMN phone TEXT"); } catch { /* column exists */ }
 
   db.run(`
     CREATE TABLE IF NOT EXISTS recipients (
@@ -249,14 +252,27 @@ export function saveVoiceEvent(
   save();
 }
 
-export function createParticipant(name: string, pin: string): Participant {
+export function createParticipant(name: string, pin: string, phone?: string): Participant {
   const id = uuid();
   const created_at = new Date().toISOString();
-  db.run("INSERT INTO participants (id, name, pin, balance, created_at) VALUES (?, ?, ?, ?, ?)", [
-    id, name, pin, 5000, created_at,
+  db.run("INSERT INTO participants (id, name, phone, pin, balance, created_at) VALUES (?, ?, ?, ?, ?, ?)", [
+    id, name, phone ?? null, pin, 5000, created_at,
   ]);
   save();
-  return { id, name, pin, balance: 5000, created_at };
+  return { id, name, phone, pin, balance: 5000, created_at };
+}
+
+export function getParticipantByPhone(phone: string): Participant | undefined {
+  return queryOne("SELECT * FROM participants WHERE phone = ?", [phone]) as Participant | undefined;
+}
+
+export function setParticipantSecret(id: string, pin: string, name?: string): void {
+  if (name) {
+    db.run("UPDATE participants SET pin = ?, name = ? WHERE id = ?", [pin, name, id]);
+  } else {
+    db.run("UPDATE participants SET pin = ? WHERE id = ?", [pin, id]);
+  }
+  save();
 }
 
 export function getAllParticipants(): Participant[] {

@@ -652,6 +652,22 @@ body {
   font-weight: 500;
 }
 
+.login-input {
+  width: 100%;
+  padding: 0.9rem 1rem;
+  font-size: 1.1rem;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  font-family: inherit;
+  background: var(--card-bg);
+  color: var(--text);
+  letter-spacing: normal;
+}
+.login-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
 .account-list {
   display: flex;
   flex-direction: column;

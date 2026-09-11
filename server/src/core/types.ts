@@ -101,6 +101,7 @@ export interface OrchestratorResponse {
 export interface Participant {
   id: string;
   name: string;
+  phone?: string;
   pin: string;
   balance: number;
   created_at: string;
