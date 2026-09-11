@@ -36,7 +36,6 @@ export function LoginPage({ onLogin }: Props) {
   const [error, setError] = useState("");
   const [welcomeName, setWelcomeName] = useState("");
   const [bioAvailable, setBioAvailable] = useState(false);
-  const [hasAccount, setHasAccount] = useState(false);
   const onLoginRef = useRef(onLogin);
   onLoginRef.current = onLogin;
   const spokenRef = useRef("");
@@ -128,14 +127,6 @@ export function LoginPage({ onLogin }: Props) {
       let available = false;
       try { available = !!(await NativeBiometric.isAvailable()).isAvailable; } catch { available = false; }
       setBioAvailable(available);
-      let linked = false;
-      if (available) {
-        try {
-          const creds = await NativeBiometric.getCredentials({ server: BIO_SERVER });
-          linked = !!(creds?.username && creds?.password);
-        } catch { linked = false; }
-      }
-      setHasAccount(linked);
       setStage("landing");
     })();
   }, []);

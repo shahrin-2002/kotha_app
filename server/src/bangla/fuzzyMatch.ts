@@ -82,12 +82,21 @@ export function fuzzyMatchRecipient(
     }
   }
 
-  // Fuzzy match each candidate against each recipient
+  // Fuzzy match each candidate against each recipient.
+  // Use a tight, length-relative threshold: short names must be near-exact.
+  // This prevents a mis-heard word (e.g. "এটি") from being force-matched to an
+  // unrelated recipient (e.g. "করিম") — better to reject and ask again.
   const allScored: Array<{ name: string; distance: number }> = [];
   for (const candidate of candidates) {
+    if (candidate.length < 2) continue;
     for (const name of recipients) {
-      const dist = levenshtein(candidate, name.toLowerCase());
-      if (dist <= threshold) {
+      const target = name.toLowerCase();
+      // ≤4 chars → allow 1 edit; longer → allow 2. Also cap by the passed threshold.
+      const maxDist = Math.min(threshold, target.length <= 4 ? 1 : 2);
+      // Reject wildly different lengths outright
+      if (Math.abs(candidate.length - target.length) > maxDist) continue;
+      const dist = levenshtein(candidate, target);
+      if (dist <= maxDist) {
         const existing = allScored.find(s => s.name === name);
         if (!existing || dist < existing.distance) {
           if (existing) existing.distance = dist;
