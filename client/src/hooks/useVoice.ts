@@ -66,9 +66,10 @@ export function useVoice() {
   }, []);
 
   const sendAudioToServer = useCallback(async (audioBlob: Blob) => {
-    // Ignore anything captured while the AI is speaking (prevents transcribing its own voice)
-    if (isSpeakingRef.current) {
-      addLog("⏭️ dropped (AI speaking)");
+    // Ignore anything captured while the AI is speaking or during the echo cooldown
+    // right after (prevents transcribing the AI's own voice → repeating transcript)
+    if (isSpeakingRef.current || Date.now() - ttsEndedAtRef.current < 500) {
+      addLog("⏭️ dropped (AI speaking / echo cooldown)");
       return;
     }
     if (audioBlob.size < 1000) {
@@ -148,17 +149,24 @@ export function useVoice() {
     addLog(`🟢 VAD start | ctx=${audioContextRef.current?.state} track=${track?.readyState}/${track?.enabled ? "on" : "muted"}`);
     setVoiceState("listening");
 
-    const ECHO_COOLDOWN = 500; // ignore mic for 0.5s after AI stops (avoid recording its echo)
+    const ECHO_COOLDOWN = 700; // ignore mic for 0.7s after AI stops (avoid recording its echo)
 
     const loop = () => {
       if (!vadRunningRef.current) return;
 
-      // Don't listen while the AI is speaking, or briefly after (speaker echo)
+      // Don't listen while the AI is speaking, or briefly after (speaker echo).
+      // Crucially, ABORT any recording already in progress so the AI's own voice
+      // is never captured and re-transcribed (the repeating-transcript bug).
       if (isSpeakingRef.current || Date.now() - ttsEndedAtRef.current < ECHO_COOLDOWN) {
-        if (!isRecordingRef.current) {
-          vadFrameRef.current = requestAnimationFrame(loop);
-          return;
+        if (isRecordingRef.current && recorderRef.current) {
+          recorderRef.current.onstop = null;
+          try { recorderRef.current.stop(); } catch {}
+          recorderRef.current = null;
+          isRecordingRef.current = false;
+          silenceStartRef.current = 0;
         }
+        vadFrameRef.current = requestAnimationFrame(loop);
+        return;
       }
 
       // Use time-domain data (waveform) — values centered at 128, deviations = sound
