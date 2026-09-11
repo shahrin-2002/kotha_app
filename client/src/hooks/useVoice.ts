@@ -33,6 +33,7 @@ export function useVoice() {
   const [debugLog, setDebugLog] = useState<string[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const isSpeakingRef = useRef(false);
+  const ttsEndedAtRef = useRef<number>(0); // when the AI last finished speaking (for echo cooldown)
   const activatedRef = useRef(false);
   const seqRef = useRef(0);
   const micReadyRef = useRef(false);
@@ -65,6 +66,11 @@ export function useVoice() {
   }, []);
 
   const sendAudioToServer = useCallback(async (audioBlob: Blob) => {
+    // Ignore anything captured while the AI is speaking (prevents transcribing its own voice)
+    if (isSpeakingRef.current) {
+      addLog("⏭️ dropped (AI speaking)");
+      return;
+    }
     if (audioBlob.size < 1000) {
       addLog(`⏭️ too small (${audioBlob.size}B)`);
       return;
@@ -142,8 +148,18 @@ export function useVoice() {
     addLog(`🟢 VAD start | ctx=${audioContextRef.current?.state} track=${track?.readyState}/${track?.enabled ? "on" : "muted"}`);
     setVoiceState("listening");
 
+    const ECHO_COOLDOWN = 500; // ignore mic for 0.5s after AI stops (avoid recording its echo)
+
     const loop = () => {
       if (!vadRunningRef.current) return;
+
+      // Don't listen while the AI is speaking, or briefly after (speaker echo)
+      if (isSpeakingRef.current || Date.now() - ttsEndedAtRef.current < ECHO_COOLDOWN) {
+        if (!isRecordingRef.current) {
+          vadFrameRef.current = requestAnimationFrame(loop);
+          return;
+        }
+      }
 
       // Use time-domain data (waveform) — values centered at 128, deviations = sound
       analyser.getByteTimeDomainData(dataArray);
@@ -332,6 +348,7 @@ export function useVoice() {
     await speakWithServerTTS(text);
 
     isSpeakingRef.current = false;
+    ttsEndedAtRef.current = Date.now(); // start the echo-cooldown window
     addLog("🔊 TTS done → listening");
 
     if (activatedRef.current) {
