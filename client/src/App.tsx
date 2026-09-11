@@ -357,7 +357,7 @@ function App() {
             <button className="quick-btn" onClick={() => handleQuickPhrase("টাকা পাঠাবো")}>টাকা পাঠাবো</button>
             <button className="quick-btn" onClick={() => handleQuickPhrase("ক্যাশ আউট")}>ক্যাশ আউট</button>
             <button className="quick-btn" onClick={() => handleQuickPhrase("রিচার্জ")}>রিচার্জ</button>
-            <button className="quick-btn" onClick={() => handleQuickPhrase("বিল দিব")}>বিল পে</button>
+            <button className="quick-btn" onClick={() => handleQuickPhrase("বিল দিব")}>বিল দিন</button>
             <button className="quick-btn" onClick={() => handleQuickPhrase("ব্যালেন্স")}>ব্যালেন্স</button>
           </>}
           {screen === "select_biller" && <>

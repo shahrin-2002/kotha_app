@@ -27,7 +27,7 @@ export function HomePage({ onTaskSelect, promptText }: HomePageProps) {
         />
         <IconTile
           icon="🧾"
-          label="বিল পে"
+          label="বিল দিন"
           onClick={() => onTaskSelect("pay_bill")}
         />
         <IconTile

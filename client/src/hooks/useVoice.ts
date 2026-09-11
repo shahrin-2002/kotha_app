@@ -132,8 +132,9 @@ export function useVoice() {
     const stream = mediaStreamRef.current;
     const dataArray = new Uint8Array(analyser.fftSize);
     const START_THRESHOLD = 4;   // lower = triggers on quieter speech (no need to shout)
-    const STOP_THRESHOLD = 2;
-    const SILENCE_DURATION = 1200;
+    const STOP_THRESHOLD = 3;    // detect end-of-speech even with mild background noise
+    const SILENCE_DURATION = 600; // finalize ~0.6s after you stop (was 1.2s) → snappier
+    const MAX_RECORD_DURATION = 6000; // hard cap so it never listens endlessly
     let frameCount = 0;
 
     // Check stream health
@@ -156,6 +157,19 @@ export function useVoice() {
       frameCount++;
       if (frameCount % 90 === 0) {
         addLog(`📊 level=${avg.toFixed(1)} ${isRecordingRef.current ? "🔴REC" : "⚪wait"}`);
+      }
+
+      // Safety net: force-finalize if a single utterance runs too long
+      if (isRecordingRef.current && Date.now() - recordStartRef.current > MAX_RECORD_DURATION) {
+        if (recorderRef.current && recorderRef.current.state === "recording") {
+          recorderRef.current.stop();
+          addLog(`⏹️ max duration → Whisper`);
+        }
+        recorderRef.current = null;
+        isRecordingRef.current = false;
+        silenceStartRef.current = 0;
+        vadFrameRef.current = requestAnimationFrame(loop);
+        return;
       }
 
       const threshold = isRecordingRef.current ? STOP_THRESHOLD : START_THRESHOLD;

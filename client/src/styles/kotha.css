@@ -33,6 +33,23 @@ body {
   min-height: 100dvh;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
+  /* Bengali needs normal spacing + full shaping so matras like ো render correctly */
+  letter-spacing: normal;
+  text-rendering: optimizeLegibility;
+  -webkit-font-feature-settings: normal;
+  font-feature-settings: normal;
+}
+
+/* Never letter-space Bengali headings — it collapses conjuncts/matras (the "কোথা" o-kar issue) */
+.app-header,
+.login-header,
+.login-subtitle,
+.prompt-text,
+.tile-label,
+.name,
+.account-name {
+  letter-spacing: normal;
+  font-family: 'Noto Sans Bengali', 'Hind Siliguri', sans-serif;
 }
 
 #root {

@@ -1,0 +1,14 @@
+name: keep-warm
+# Pings the Render backend every ~10 min so the free instance doesn't sleep
+# (which otherwise adds a ~50s cold-start delay to the first voice command).
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: |
+          curl -sS --max-time 60 https://kotha-server-s3g2.onrender.com/api/health || true
