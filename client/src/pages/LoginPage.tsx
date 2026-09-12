@@ -103,7 +103,7 @@ export function LoginPage({ onLogin }: Props) {
       let dev = 0;
       for (let i = 0; i < data.length; i++) { const d = Math.abs(data[i] - 128); if (d > dev) dev = d; }
       const now = Date.now();
-      if (dev > 5) { started = true; silenceStart = 0; }
+      if (dev > 3) { started = true; silenceStart = 0; }
       else if (started) { if (!silenceStart) silenceStart = now; else if (now - silenceStart > silenceMs) { stop(); return; } }
       if (now - t0 > maxMs) { stop(); return; }
       raf = requestAnimationFrame(loop);
@@ -188,22 +188,25 @@ export function LoginPage({ onLogin }: Props) {
 
   // ── voice dialogs per screen ───────────────────────────
   const runLanding = useCallback(async () => {
+    await ensureMic();
     await speakAsync("কথায় স্বাগতম। আপনার কি একাউন্ট আছে? থাকলে বলুন লগইন। নতুন হলে বলুন নতুন একাউন্ট।");
-    const t = await listenOnce();
+    const t = await listenOnce(6000, 1000);
+    setStatus(t ? `শুনলাম: ${t}` : "");
     if (wantsCreate(t)) { goCreate(); return; }
     if (wantsLogin(t)) { biometricLogin(); return; }
-    await speakAsync("বুঝতে পারিনি। নিচের বোতাম থেকে বেছে নিন।");
-  }, [speakAsync, listenOnce, goCreate, biometricLogin]);
+    await speakAsync("বুঝতে পারিনি। নিচের বোতাম থেকে বেছে নিন — প্রবেশ করুন অথবা নতুন একাউন্ট।");
+  }, [ensureMic, speakAsync, listenOnce, goCreate, biometricLogin]);
 
   const runCreate = useCallback(async () => {
+    await ensureMic();
     await speakAsync("নতুন একাউন্ট খুলি। আপনার নাম বলুন।");
     const n = await listenOnce(7000, 1200);
-    if (n) setName(n);
+    if (n) { setName(n); setStatus(`নাম: ${n}`); }
     // Phone numbers are recited with pauses between digit groups — allow long gaps + window
     await speakAsync("এবার আপনার মোবাইল নম্বরটি ধীরে ধীরে বলুন।");
     const p = await listenOnce(14000, 2500);
     const d = toDigits(p);
-    if (d) setPhone(d);
+    if (d) { setPhone(d); setStatus(`নম্বর: ${d}`); }
     await speakAsync("নাম ও নম্বর দেখে নিন। ঠিক থাকলে আঙুলের ছাপ দিন, নয়তো টাইপ করে ঠিক করুন।");
   }, [speakAsync, listenOnce]);
 
@@ -219,6 +222,7 @@ export function LoginPage({ onLogin }: Props) {
       let available = false;
       try { available = !!(await NativeBiometric.isAvailable()).isAvailable; } catch { available = false; }
       setBioAvailable(available);
+      ensureMic(); // warm the mic + trigger the permission prompt up front
       setStage("landing");
     })();
   }, []);
