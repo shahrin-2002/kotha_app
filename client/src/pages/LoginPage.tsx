@@ -228,6 +228,16 @@ export function LoginPage({ onLogin }: Props) {
     if (stage === "create" && stageRunRef.current !== "create") { stageRunRef.current = "create"; runCreate(); }
   }, [stage, runLanding, runCreate]);
 
+  // Release mic + audio when leaving the login screen, so the main app's TTS
+  // can route to the loudspeaker (a lingering open mic forces earpiece output).
+  useEffect(() => {
+    return () => {
+      try { if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; } } catch {}
+      try { streamRef.current?.getTracks().forEach((t) => t.stop()); streamRef.current = null; } catch {}
+      try { ctxRef.current?.close(); ctxRef.current = null; } catch {}
+    };
+  }, []);
+
   // mount: detect biometric, then show landing
   useEffect(() => {
     // Wake the (free-tier) Render server immediately so it's ready by the time

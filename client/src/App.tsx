@@ -179,6 +179,11 @@ function App() {
   const screen = session.uiUpdate.screen;
   const slots = session.uiUpdate.filled_slots;
 
+  // Number-entry screens: let the mic tolerate long pauses between digit groups
+  useEffect(() => {
+    voice.setLongPause(["enter_account", "enter_number", "enter_amount"].includes(screen));
+  }, [screen, voice.setLongPause]);
+
   if (appState === "login") {
     return (
       <>

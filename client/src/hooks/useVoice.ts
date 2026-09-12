@@ -34,6 +34,7 @@ export function useVoice() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const isSpeakingRef = useRef(false);
   const ttsEndedAtRef = useRef<number>(0); // when the AI last finished speaking (for echo cooldown)
+  const longPauseRef = useRef(false); // true on number-entry screens (allow long pauses)
   const activatedRef = useRef(false);
   const seqRef = useRef(0);
   const micReadyRef = useRef(false);
@@ -140,8 +141,10 @@ export function useVoice() {
     const dataArray = new Uint8Array(analyser.fftSize);
     const START_THRESHOLD = 4;   // lower = triggers on quieter speech (no need to shout)
     const STOP_THRESHOLD = 3;    // detect end-of-speech even with mild background noise
-    const SILENCE_DURATION = 600; // finalize ~0.6s after you stop (was 1.2s) → snappier
-    const MAX_RECORD_DURATION = 6000; // hard cap so it never listens endlessly
+    // Numbers (phone/account/amount) are recited with pauses between digit groups,
+    // so those screens use a longer silence window + cap; normal turns stay snappy.
+    const SILENCE_DURATION = longPauseRef.current ? 2200 : 600;
+    const MAX_RECORD_DURATION = longPauseRef.current ? 15000 : 6000;
     let frameCount = 0;
 
     // Check stream health
@@ -353,6 +356,12 @@ export function useVoice() {
     isSpeakingRef.current = true;
     stopVAD();
 
+    // Release the mic BEFORE speaking. An open mic forces Android into
+    // communication mode and routes audio to the earpiece (TTS inaudible).
+    // Releasing it lets TTS play through the loudspeaker; we re-acquire after.
+    teardownMic();
+    await new Promise((r) => setTimeout(r, 60));
+
     await speakWithServerTTS(text);
 
     isSpeakingRef.current = false;
@@ -360,18 +369,12 @@ export function useVoice() {
     addLog("🔊 TTS done → listening");
 
     if (activatedRef.current) {
-      // Keep the mic warm — do NOT tear it down and re-create it here.
-      // Re-initializing getUserMedia each turn added a ~1s gap where the user's
-      // reply was missed. The mic stays open; we just resume VAD instantly.
-      if (!micReadyRef.current) {
-        const ok = await initMic();
-        if (!ok) return;
-      }
-      await startVAD();
+      const ok = await initMic();
+      if (ok) await startVAD();
     } else {
       setVoiceState("idle");
     }
-  }, [stopVAD, startVAD, initMic, addLog, speakWithServerTTS]);
+  }, [stopVAD, startVAD, initMic, teardownMic, addLog, speakWithServerTTS]);
 
   const stopSpeaking = useCallback(() => {
     if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
@@ -394,5 +397,6 @@ export function useVoice() {
     stopListening,
     speak,
     stopSpeaking,
+    setLongPause: (v: boolean) => { longPauseRef.current = v; },
   };
 }
