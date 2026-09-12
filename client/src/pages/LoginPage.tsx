@@ -238,16 +238,21 @@ export function LoginPage({ onLogin }: Props) {
     };
   }, []);
 
-  // mount: detect biometric, then show landing
+  // mount: detect biometric + WAIT for the server to wake, THEN show landing.
+  // Front-loading the free-tier cold start (with a clear message) means the first
+  // voice command hits a warm server (~2s) instead of freezing for ~40s.
   useEffect(() => {
-    // Wake the (free-tier) Render server immediately so it's ready by the time
-    // the user answers — avoids the ~40s cold-start dead wait on the first command.
-    fetch(`${API_BASE}/api/health`).catch(() => {});
     (async () => {
       let available = false;
       try { available = !!(await NativeBiometric.isAvailable()).isAvailable; } catch { available = false; }
       setBioAvailable(available);
       ensureMic(); // warm the mic + trigger the permission prompt up front
+      setStatus("সার্ভার প্রস্তুত হচ্ছে, একটু অপেক্ষা করুন...");
+      for (let i = 0; i < 30; i++) {
+        try { const r = await fetch(`${API_BASE}/api/health`, { cache: "no-store" }); if (r.ok) break; } catch {}
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+      setStatus("");
       setStage("landing");
     })();
   }, []);
@@ -261,7 +266,7 @@ export function LoginPage({ onLogin }: Props) {
         <div className="login-header">কথা</div>
         <div className="fingerprint-card">
           <div className="fingerprint-icon scanning">🔒</div>
-          <div className="fingerprint-label">{stage === "working" ? "প্রক্রিয়া চলছে..." : "লোড হচ্ছে..."}</div>
+          <div className="fingerprint-label">{stage === "working" ? "প্রক্রিয়া চলছে..." : (status || "লোড হচ্ছে...")}</div>
         </div>
       </div>
     );
