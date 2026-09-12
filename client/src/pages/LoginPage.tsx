@@ -67,8 +67,12 @@ export function LoginPage({ onLogin }: Props) {
       src.connect(an);
       ctxRef.current = ctx;
       analyserRef.current = an;
+      console.log("[login-voice] mic OK, ctx=" + ctx.state);
       return true;
-    } catch { return false; }
+    } catch (e: any) {
+      console.log("[login-voice] mic FAILED: " + (e?.message || e));
+      return false;
+    }
   }, []);
 
   const listenOnce = useCallback((maxMs = 6000, silenceMs = 900) => new Promise<string>(async (resolve) => {
@@ -83,29 +87,37 @@ export function LoginPage({ onLogin }: Props) {
     const chunks: Blob[] = [];
     rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
     rec.onstop = async () => {
-      setStatus("");
       const blob = new Blob(chunks, { type: "audio/webm" });
-      if (blob.size < 1200) { resolve(""); return; }
+      console.log("[login-voice] recorded " + blob.size + " bytes");
+      if (blob.size < 1200) { setStatus(""); console.log("[login-voice] too small, skip"); resolve(""); return; }
+      setStatus("⏳ সংযোগ হচ্ছে...");
       try {
         const r = await fetch(`${API_BASE}/api/stt`, { method: "POST", headers: { "Content-Type": "audio/webm" }, body: blob });
         const d = await r.json();
+        console.log("[login-voice] STT -> \"" + (d.transcript || "") + "\"");
         resolve((d.transcript || "").trim());
-      } catch { resolve(""); }
+      } catch (e: any) { console.log("[login-voice] STT error: " + (e?.message || e)); resolve(""); }
     };
+    console.log("[login-voice] recording started");
     rec.start(100);
     const data = new Uint8Array(analyser.fftSize);
-    let started = false, silenceStart = 0;
+    let started = false, silenceStart = 0, maxDev = 0;
     const t0 = Date.now();
     let raf = 0;
-    const stop = () => { cancelAnimationFrame(raf); if (rec.state === "recording") { try { rec.stop(); } catch {} } };
+    const stop = (reason: string) => {
+      console.log(`[login-voice] stop (${reason}) started=${started} maxLevel=${maxDev}`);
+      cancelAnimationFrame(raf);
+      if (rec.state === "recording") { try { rec.stop(); } catch {} }
+    };
     const loop = () => {
       analyser.getByteTimeDomainData(data);
       let dev = 0;
       for (let i = 0; i < data.length; i++) { const d = Math.abs(data[i] - 128); if (d > dev) dev = d; }
+      if (dev > maxDev) maxDev = dev;
       const now = Date.now();
       if (dev > 3) { started = true; silenceStart = 0; }
-      else if (started) { if (!silenceStart) silenceStart = now; else if (now - silenceStart > silenceMs) { stop(); return; } }
-      if (now - t0 > maxMs) { stop(); return; }
+      else if (started) { if (!silenceStart) silenceStart = now; else if (now - silenceStart > silenceMs) { stop("silence"); return; } }
+      if (now - t0 > maxMs) { stop("maxtime"); return; }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -218,6 +230,9 @@ export function LoginPage({ onLogin }: Props) {
 
   // mount: detect biometric, then show landing
   useEffect(() => {
+    // Wake the (free-tier) Render server immediately so it's ready by the time
+    // the user answers — avoids the ~40s cold-start dead wait on the first command.
+    fetch(`${API_BASE}/api/health`).catch(() => {});
     (async () => {
       let available = false;
       try { available = !!(await NativeBiometric.isAvailable()).isAvailable; } catch { available = false; }
