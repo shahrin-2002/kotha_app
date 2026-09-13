@@ -53,6 +53,11 @@ export function useVoice() {
   const capturingRef = useRef(false);
   const finalRef = useRef("");
   const gotFinalRef = useRef(false);
+  const startedRef = useRef(false);      // speech detected this turn
+  const silenceStartRef = useRef(0);     // when the current silence began
+  const stoppedRef = useRef(false);      // already sent end-of-turn
+  const captureStartRef = useRef(0);     // when capture began (grace period)
+  const longPauseRef = useRef(false);    // longer silence tolerance on number screens
 
   const addLog = useCallback((msg: string) => {
     console.log("[Voice]", msg);
@@ -149,6 +154,10 @@ export function useVoice() {
     const stream = streamRef.current!;
     finalRef.current = "";
     gotFinalRef.current = false;
+    startedRef.current = false;
+    silenceStartRef.current = 0;
+    stoppedRef.current = false;
+    captureStartRef.current = Date.now();
     setInterimText("");
     try { ws.send(JSON.stringify({ type: "start" })); } catch {}
 
@@ -159,8 +168,28 @@ export function useVoice() {
     processor.onaudioprocess = (e) => {
       if (!capturingRef.current || isSpeakingRef.current) return;
       if (wsRef.current?.readyState !== WebSocket.OPEN) return;
-      const pcm = downsampleTo16kInt16(e.inputBuffer.getChannelData(0), ctx.sampleRate);
+      const data = e.inputBuffer.getChannelData(0);
+      const pcm = downsampleTo16kInt16(data, ctx.sampleRate);
       try { wsRef.current.send(pcm.buffer as ArrayBuffer); } catch {}
+
+      // Client-side endpointing: when speech is followed by silence, tell the
+      // server to end the Google stream so it returns the final transcript.
+      const now = Date.now();
+      if (now - captureStartRef.current < 350) return; // grace period (ignore TTS-tail echo)
+      let peak = 0;
+      for (let i = 0; i < data.length; i++) { const a = Math.abs(data[i]); if (a > peak) peak = a; }
+      if (peak > 0.02) {
+        startedRef.current = true;
+        silenceStartRef.current = 0;
+      } else if (startedRef.current && !stoppedRef.current) {
+        if (!silenceStartRef.current) silenceStartRef.current = now;
+        else if (now - silenceStartRef.current > (longPauseRef.current ? 2000 : 800)) {
+          stoppedRef.current = true;
+          capturingRef.current = false;
+          try { wsRef.current!.send(JSON.stringify({ type: "stop" })); } catch {}
+          addLog("⏹️ endpoint → finalize");
+        }
+      }
     };
     // Route through a muted gain so onaudioprocess fires without echoing mic to the speaker
     const mute = ctx.createGain();
@@ -237,7 +266,7 @@ export function useVoice() {
     stopListening,
     speak,
     stopSpeaking,
-    setLongPause: (_v: boolean) => {},  // handled by Google endpointing now
+    setLongPause: (v: boolean) => { longPauseRef.current = v; }, // longer silence on number screens
     setEchoFilter: (_v: boolean) => {}, // handled by not capturing during/just-after TTS
   };
 }
