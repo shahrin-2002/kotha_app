@@ -175,7 +175,7 @@ async function googleSTT(audio: Buffer): Promise<string | null> {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        config: { encoding: "WEBM_OPUS", languageCode: "bn-BD", maxAlternatives: 1, model: "default" },
+        config: { encoding: "WEBM_OPUS", sampleRateHertz: 48000, languageCode: "bn-BD", maxAlternatives: 1, model: "default" },
         audio: { content: audio.toString("base64") },
       }),
     });
