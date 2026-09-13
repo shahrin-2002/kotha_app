@@ -89,7 +89,13 @@ app.get("/", (_req, res) => {
 });
 
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", bangla_test: "কথা চালু আছে" });
+  res.json({
+    status: "ok",
+    bangla_test: "কথা চালু আছে",
+    stt: process.env.GOOGLE_API_KEY ? "google-bn-BD" : (process.env.OPENAI_API_KEY ? "openai-whisper" : "none"),
+    tts: process.env.CARTESIA_API_KEY ? "cartesia" : "google-translate",
+    persistent: !!process.env.DATA_DIR,
+  });
 });
 
 const CARTESIA_API_KEY = process.env.CARTESIA_API_KEY ?? "";
