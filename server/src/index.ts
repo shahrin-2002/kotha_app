@@ -94,7 +94,7 @@ app.get("/api/health", (_req, res) => {
     status: "ok",
     bangla_test: "কথা চালু আছে",
     stt: process.env.GOOGLE_API_KEY ? "google-bn-BD" : (process.env.OPENAI_API_KEY ? "openai-whisper" : "none"),
-    tts: process.env.CARTESIA_API_KEY ? "cartesia" : "google-translate",
+    tts: process.env.GOOGLE_API_KEY ? "google-cloud-bn-IN" : (process.env.CARTESIA_API_KEY ? "cartesia" : "google-translate"),
     persistent: !!process.env.DATA_DIR,
   });
 });
@@ -104,10 +104,46 @@ const CARTESIA_API_KEY = process.env.CARTESIA_API_KEY ?? "";
 const CARTESIA_VOICE_ID = process.env.CARTESIA_VOICE_ID ?? "59ba7dee-8f9a-432f-a6c0-ffb33666b654";
 if (CARTESIA_API_KEY) console.log("Cartesia Bangla TTS enabled (sonic-3)");
 
+// Google Cloud Text-to-Speech — natural Bangla (bn-IN) Chirp3-HD voice.
+// Fast (~1.5s) and high quality; uses the same key as STT. This is the primary voice.
+const GOOGLE_TTS_VOICE = process.env.GOOGLE_TTS_VOICE ?? "bn-IN-Chirp3-HD-Aoede";
+async function googleCloudTTS(text: string): Promise<Buffer | null> {
+  const key = process.env.GOOGLE_API_KEY ?? "";
+  if (!key) return null;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8000);
+  try {
+    const r = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${key}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        input: { text },
+        voice: { languageCode: "bn-IN", name: GOOGLE_TTS_VOICE },
+        audioConfig: { audioEncoding: "MP3", sampleRateHertz: 24000 },
+      }),
+      signal: ctl.signal,
+    });
+    if (!r.ok) {
+      console.error(`[Google TTS] status ${r.status}: ${(await r.text()).slice(0, 120)}`);
+      return null;
+    }
+    const d = (await r.json()) as { audioContent?: string };
+    if (!d.audioContent) return null;
+    return Buffer.from(d.audioContent, "base64");
+  } catch (e: any) {
+    console.error("[Google TTS] error:", e.message);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function cartesiaTTS(text: string): Promise<Buffer | null> {
   if (!CARTESIA_API_KEY) return null;
   // Retry so a transient failure doesn't drop us to the (different) Google voice.
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 6000);
     try {
       const r = await fetch("https://api.cartesia.ai/tts/bytes", {
         method: "POST",
@@ -123,11 +159,14 @@ async function cartesiaTTS(text: string): Promise<Buffer | null> {
           language: "bn",
           output_format: { container: "mp3", sample_rate: 44100, bit_rate: 128000 },
         }),
+        signal: ctl.signal,
       });
       if (r.ok) return Buffer.from(await r.arrayBuffer());
       console.error(`[Cartesia TTS] attempt ${attempt} status ${r.status}: ${(await r.text()).slice(0, 120)}`);
     } catch (e: any) {
       console.error(`[Cartesia TTS] attempt ${attempt} error:`, e.message);
+    } finally {
+      clearTimeout(timer);
     }
   }
   return null;
@@ -151,8 +190,8 @@ app.get("/api/tts", async (req, res) => {
     return;
   }
   try {
-    // Prefer Cartesia Sonic-3 (natural Bangla); fall back to Google Translate TTS.
-    const audio = (await cartesiaTTS(text)) ?? (await googleTTS(text));
+    // Primary: Google Cloud Chirp3-HD (natural bn-IN, ~1.5s). Fallbacks: Cartesia, then Google Translate.
+    const audio = (await googleCloudTTS(text)) ?? (await cartesiaTTS(text)) ?? (await googleTTS(text));
     if (!audio) {
       res.status(502).json({ error: "TTS failed" });
       return;

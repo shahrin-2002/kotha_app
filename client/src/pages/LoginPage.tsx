@@ -18,8 +18,6 @@ function toDigits(s: string): string {
   return s.replace(/[০-৯]/g, (d) => BN2A[d] ?? d).replace(/\D/g, "");
 }
 function gen4(): string { return String(Math.floor(1000 + Math.random() * 9000)); }
-const wantsCreate = (t: string) => /(নতুন|খুল|নাই|নেই|তৈরি|রেজিস্ট|create|new|no)/i.test(t);
-const wantsLogin = (t: string) => /(লগইন|লগ\s*ইন|প্রবেশ|আছে|ঢুক|পুরান|আগের|login|yes)/i.test(t);
 
 export function LoginPage({ onLogin }: Props) {
   const [stage, setStage] = useState<Stage>("loading");
@@ -200,14 +198,17 @@ export function LoginPage({ onLogin }: Props) {
 
   // ── voice dialogs per screen ───────────────────────────
   const runLanding = useCallback(async () => {
-    await ensureMic();
-    await speakAsync("কথায় স্বাগতম। আপনার কি একাউন্ট আছে? থাকলে বলুন লগইন। নতুন হলে বলুন নতুন একাউন্ট।");
-    const t = await listenOnce(6000, 1000);
-    setStatus(t ? `শুনলাম: ${t}` : "");
-    if (wantsCreate(t)) { goCreate(); return; }
-    if (wantsLogin(t)) { biometricLogin(); return; }
-    await speakAsync("বুঝতে পারিনি। নিচের বোতাম থেকে বেছে নিন — প্রবেশ করুন অথবা নতুন একাউন্ট।");
-  }, [ensureMic, speakAsync, listenOnce, goCreate, biometricLogin]);
+    // Fast path: no slow batch STT on the login screen. If this phone already has
+    // a saved credential it's a returning user → go straight to the fingerprint
+    // prompt (instant). Otherwise guide the user to the "new account" button.
+    const existing = await NativeBiometric.getCredentials({ server: BIO_SERVER }).catch(() => null);
+    if (existing?.username && existing?.password) {
+      await speakAsync("কথায় স্বাগতম। প্রবেশ করতে আঙুলের ছাপ দিন।");
+      biometricLogin();
+      return;
+    }
+    await speakAsync("কথায় স্বাগতম। এই ফোনে কোনো একাউন্ট নেই। নতুন একাউন্ট খুলতে নিচের বোতামে চাপ দিন।");
+  }, [speakAsync, biometricLogin]);
 
   const runCreate = useCallback(async () => {
     await ensureMic();
