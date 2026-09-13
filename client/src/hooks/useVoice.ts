@@ -34,6 +34,7 @@ export function useVoice() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const isSpeakingRef = useRef(false);
   const ttsEndedAtRef = useRef<number>(0); // when the AI last finished speaking (for echo cooldown)
+  const lastSpokenTextRef = useRef(""); // the AI's last prompt text (for echo-text filtering)
   const longPauseRef = useRef(false); // true on number-entry screens (allow long pauses)
   const activatedRef = useRef(false);
   const seqRef = useRef(0);
@@ -94,6 +95,17 @@ export function useVoice() {
       }
       if (data.transcript && data.transcript.trim()) {
         const text = data.transcript.trim();
+        // Echo guard: if what we "heard" is really a chunk of the AI's last prompt
+        // (e.g. hearing "পাঠাবেন" from "কাকে টাকা পাঠাবেন"), drop it — it's the
+        // loudspeaker echo, not the user, and would otherwise loop forever.
+        const norm = (s: string) => s.replace(/[\s।,?!.।]/g, "");
+        const nt = norm(text), np = norm(lastSpokenTextRef.current);
+        const chunk = nt.slice(0, Math.max(4, Math.floor(nt.length * 0.7)));
+        if (np && chunk.length >= 4 && np.includes(chunk)) {
+          addLog(`⏭️ echo dropped "${text}"`);
+          setInterimText("");
+          return;
+        }
         addLog(`✅ "${text}"`);
         setInterimText("");
         seqRef.current++;
@@ -325,6 +337,7 @@ export function useVoice() {
   }, [teardownMic]);
 
   const speakWithServerTTS = useCallback(async (text: string): Promise<void> => {
+    lastSpokenTextRef.current = text; // remember for the echo-text filter
     const chunks = splitText(text);
     addLog(`🔊 TTS (${chunks.length} parts)`);
     setVoiceState("speaking");
