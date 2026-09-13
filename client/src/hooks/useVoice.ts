@@ -152,7 +152,7 @@ export function useVoice() {
     addLog(`🟢 VAD start | ctx=${audioContextRef.current?.state} track=${track?.readyState}/${track?.enabled ? "on" : "muted"}`);
     setVoiceState("listening");
 
-    const ECHO_COOLDOWN = 700; // ignore mic for 0.7s after AI stops (avoid recording its echo)
+    const ECHO_COOLDOWN = 600; // ignore mic ~0.6s after it re-opens (kills loudspeaker echo tail)
 
     const loop = () => {
       if (!vadRunningRef.current) return;
@@ -365,12 +365,18 @@ export function useVoice() {
     await speakWithServerTTS(text);
 
     isSpeakingRef.current = false;
-    ttsEndedAtRef.current = Date.now(); // start the echo-cooldown window
+    // Small gap so the loudspeaker fully stops before we re-open the mic.
+    await new Promise((r) => setTimeout(r, 250));
     addLog("🔊 TTS done → listening");
 
     if (activatedRef.current) {
       const ok = await initMic();
-      if (ok) await startVAD();
+      if (ok) {
+        // Start the echo-cooldown NOW (mic is live), not when TTS ended — mic
+        // re-init takes time, so anchoring here guarantees a full quiet window.
+        ttsEndedAtRef.current = Date.now();
+        await startVAD();
+      }
     } else {
       setVoiceState("idle");
     }
