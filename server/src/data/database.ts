@@ -2,81 +2,36 @@ import initSqlJs, { type Database as SqlJsDatabase } from "sql.js";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { v4 as uuid } from "uuid";
-import { createClient, type Client } from "@libsql/client";
 import type { Participant, Recipient, Agent } from "../core/types.js";
 
-// DATA_DIR lets us point the SQLite file at a mounted persistent disk on Render
+// DATA_DIR points the SQLite file at a mounted persistent disk on Render
 // (set DATA_DIR=/var/data). Falls back to the local ./data folder in dev.
 const DATA_DIR = process.env.DATA_DIR || join(import.meta.dirname, "../../data");
 const DB_PATH = join(DATA_DIR, "kotha.db");
 
 let db: SqlJsDatabase;
 
-// Optional Turso (libSQL) persistence: we snapshot the whole SQLite image to a
-// single row in Turso on save, and restore it on boot. This makes accounts
-// survive Render restarts/redeploys without rewriting the sync query layer.
-// Inert unless TURSO_DATABASE_URL is set (falls back to the local file).
-let turso: Client | null = null;
-if (process.env.TURSO_DATABASE_URL) {
-  turso = createClient({
-    url: process.env.TURSO_DATABASE_URL,
-    authToken: process.env.TURSO_AUTH_TOKEN,
-  });
-  console.log("Turso persistence enabled");
-}
-
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
-async function persistToTurso(buffer: Buffer): Promise<void> {
-  if (!turso) return;
-  try {
-    await turso.execute({
-      sql: "INSERT INTO kv (k, v) VALUES ('db', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
-      args: [buffer.toString("base64")],
-    });
-  } catch (e: any) {
-    console.error("[Turso persist]", e.message);
-  }
-}
-
 function save(): void {
-  const data = db.export();
-  const buffer = Buffer.from(data);
-  const dir = dirname(DB_PATH);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(DB_PATH, buffer);
-  if (turso) {
-    // Debounce so a burst of mutations results in one snapshot upload
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => { void persistToTurso(buffer); }, 500);
+  // Never let a filesystem error crash the server (e.g. a misconfigured disk path).
+  try {
+    const data = db.export();
+    const buffer = Buffer.from(data);
+    const dir = dirname(DB_PATH);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(DB_PATH, buffer);
+  } catch (e: any) {
+    console.error("[DB save]", e.message);
   }
 }
 
 export async function initDatabase(): Promise<void> {
   const SQL = await initSqlJs();
 
-  let restored = false;
-  if (turso) {
-    try {
-      await turso.execute("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT)");
-      const r = await turso.execute({ sql: "SELECT v FROM kv WHERE k = 'db'", args: [] });
-      const v = r.rows[0]?.v as string | undefined;
-      if (v) {
-        db = new SQL.Database(Buffer.from(v, "base64"));
-        restored = true;
-        console.log("Restored database snapshot from Turso");
-      }
-    } catch (e: any) {
-      console.error("[Turso restore]", e.message);
-    }
-  }
-
-  if (!restored) {
-    if (existsSync(DB_PATH)) {
-      const fileBuffer = readFileSync(DB_PATH);
-      db = new SQL.Database(fileBuffer);
-    } else {
-      db = new SQL.Database();
-    }
+  if (existsSync(DB_PATH)) {
+    try { db = new SQL.Database(readFileSync(DB_PATH)); }
+    catch { db = new SQL.Database(); }
+  } else {
+    db = new SQL.Database();
   }
 
   db.run(`
