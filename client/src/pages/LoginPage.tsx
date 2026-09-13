@@ -247,12 +247,8 @@ export function LoginPage({ onLogin }: Props) {
       try { available = !!(await NativeBiometric.isAvailable()).isAvailable; } catch { available = false; }
       setBioAvailable(available);
       ensureMic(); // warm the mic + trigger the permission prompt up front
-      setStatus("সার্ভার প্রস্তুত হচ্ছে, একটু অপেক্ষা করুন...");
-      for (let i = 0; i < 30; i++) {
-        try { const r = await fetch(`${API_BASE}/api/health`, { cache: "no-store" }); if (r.ok) break; } catch {}
-        await new Promise((r) => setTimeout(r, 2000));
-      }
-      setStatus("");
+      // Server is always-on now — warm it in the background, don't block startup.
+      fetch(`${API_BASE}/api/health`).catch(() => {});
       setStage("landing");
     })();
   }, []);
