@@ -186,7 +186,10 @@ function App() {
   // Number-entry screens: let the mic tolerate long pauses between digit groups
   useEffect(() => {
     voice.setLongPause(["enter_account", "enter_number", "enter_amount"].includes(screen));
-  }, [screen, voice.setLongPause]);
+    // Echo filter drops transcripts matching the AI's prompt — but the home menu
+    // lists the commands, so disable it there (else "টাকা পাঠাবো" gets dropped).
+    voice.setEchoFilter(screen !== "home");
+  }, [screen, voice.setLongPause, voice.setEchoFilter]);
 
   if (appState === "login") {
     return (
