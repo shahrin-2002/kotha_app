@@ -5,7 +5,10 @@ import { v4 as uuid } from "uuid";
 import { createClient, type Client } from "@libsql/client";
 import type { Participant, Recipient, Agent } from "../core/types.js";
 
-const DB_PATH = join(import.meta.dirname, "../../data/kotha.db");
+// DATA_DIR lets us point the SQLite file at a mounted persistent disk on Render
+// (set DATA_DIR=/var/data). Falls back to the local ./data folder in dev.
+const DATA_DIR = process.env.DATA_DIR || join(import.meta.dirname, "../../data");
+const DB_PATH = join(DATA_DIR, "kotha.db");
 
 let db: SqlJsDatabase;
 

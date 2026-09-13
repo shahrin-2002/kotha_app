@@ -6,9 +6,15 @@ services:
     runtime: docker
     dockerfilePath: ./server/Dockerfile
     dockerContext: ./server
-    plan: free
+    plan: starter          # paid, always-on (no cold-start spin-down)
     healthCheckPath: /api/health
+    disk:
+      name: kotha-data     # persistent disk so accounts survive restarts/redeploys
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
+      - key: DATA_DIR      # store the SQLite DB on the persistent disk
+        value: /var/data
       # Set these in the Render dashboard (marked secret — not stored in git).
       - key: OPENAI_API_KEY
         sync: false
