@@ -728,17 +728,23 @@ const wss = new WebSocketServer({ server, path: "/ws" });
 wss.on("connection", (ws: WebSocket) => {
   let recognizeStream: any = null;
 
-  const endStream = () => {
+  // Graceful end: tell Google "no more audio" and LET it emit the final result +
+  // 'end' event (which nulls the stream). Removing listeners here loses the final.
+  const stopStream = () => {
+    if (recognizeStream) { try { recognizeStream.end(); } catch {} }
+  };
+  // Hard reset (new turn / disconnect): drop everything immediately.
+  const destroyStream = () => {
     if (recognizeStream) {
-      try { recognizeStream.end(); } catch {}
       try { recognizeStream.removeAllListeners(); } catch {}
+      try { recognizeStream.destroy(); } catch {}
       recognizeStream = null;
     }
   };
 
   const startStream = () => {
     if (!speechClient) { ws.send(JSON.stringify({ type: "error", message: "stt not configured" })); return; }
-    endStream();
+    destroyStream();
     recognizeStream = speechClient.streamingRecognize({
       config: {
         encoding: "LINEAR16",
@@ -780,11 +786,11 @@ wss.on("connection", (ws: WebSocket) => {
     let msg: any;
     try { msg = JSON.parse(data.toString()); } catch { return; }
     if (msg.type === "start") startStream();
-    else if (msg.type === "stop") endStream();
+    else if (msg.type === "stop") stopStream();
   });
 
   ws.on("close", () => {
-    if (recognizeStream) { try { recognizeStream.destroy(); } catch {} recognizeStream = null; }
+    destroyStream();
   });
 });
 

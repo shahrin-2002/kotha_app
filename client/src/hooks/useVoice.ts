@@ -240,8 +240,9 @@ export function useVoice() {
     await speakWithServerTTS(text);
     isSpeakingRef.current = false;
     addLog("🔊 TTS done → listening");
-    // Let the loudspeaker settle before re-opening the mic (avoids echo).
-    await new Promise((r) => setTimeout(r, 400));
+    // Re-open the mic immediately. getUserMedia itself takes ~0.3s (which also lets
+    // the loudspeaker settle), and the VAD grace period handles any residual echo —
+    // so no extra delay on top.
     if (activatedRef.current) { await startCapture(); }
     else setVoiceState("idle");
   }, [stopCapture, teardownMic, speakWithServerTTS, startCapture, addLog]);
