@@ -236,7 +236,10 @@ export function useVoice() {
     // Release the mic so TTS plays on the loudspeaker (open mic → earpiece routing).
     stopCapture(true);
     teardownMic();
-    await new Promise((r) => setTimeout(r, 80));
+    // Give Android time to switch the audio route from communication (mic open →
+    // earpiece) back to media (loudspeaker) before TTS plays. 80ms was too short —
+    // response turns leaked to the earpiece and were inaudible.
+    await new Promise((r) => setTimeout(r, 220));
     await speakWithServerTTS(text);
     isSpeakingRef.current = false;
     addLog("🔊 TTS done → listening");
@@ -258,8 +261,11 @@ export function useVoice() {
     setErrorMsg("");
     addLog("🟢 activated");
     await ensureWS();
-    await initMic();
-  }, [addLog, ensureWS, initMic]);
+    // Do NOT open the mic here. Opening it now puts Android into communication
+    // mode, which routes the greeting TTS to the earpiece (inaudible). The mic is
+    // opened by startCapture() only AFTER the first speak() finishes — so TTS
+    // always plays on the loudspeaker with no mic held open.
+  }, [addLog, ensureWS]);
 
   const stopListening = useCallback(() => {
     activatedRef.current = false;

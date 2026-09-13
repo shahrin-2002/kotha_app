@@ -148,10 +148,18 @@ export function LoginPage({ onLogin }: Props) {
     }
     setStage("working");
     try {
-      const res = await fetch(`${API_BASE}/api/login`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: existing.username, pin: existing.password }),
-      });
+      // Bound the request — a stalled connection must not leave the user stuck
+      // on the processing spinner forever.
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 12000);
+      let res: Response;
+      try {
+        res = await fetch(`${API_BASE}/api/login`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone: existing.username, pin: existing.password }),
+          signal: ctl.signal,
+        });
+      } finally { clearTimeout(timer); }
       if (!res.ok) {
         setError("একাউন্ট পাওয়া যায়নি। আগে একাউন্ট খুলুন।");
         await speakAsync("একাউন্ট পাওয়া যায়নি। অনুগ্রহ করে আগে একাউন্ট খুলুন।");
@@ -160,7 +168,7 @@ export function LoginPage({ onLogin }: Props) {
       }
       finish(await res.json());
     } catch {
-      setError("সার্ভারে সংযোগ করা যাচ্ছে না।");
+      setError("সার্ভারে সংযোগ করা যাচ্ছে না। আবার চেষ্টা করুন।");
       setStage("landing");
     }
   }, [speakAsync, goCreate, finish]);
@@ -243,15 +251,15 @@ export function LoginPage({ onLogin }: Props) {
   // Front-loading the free-tier cold start (with a clear message) means the first
   // voice command hits a warm server (~2s) instead of freezing for ~40s.
   useEffect(() => {
-    (async () => {
-      let available = false;
-      try { available = !!(await NativeBiometric.isAvailable()).isAvailable; } catch { available = false; }
-      setBioAvailable(available);
-      ensureMic(); // warm the mic + trigger the permission prompt up front
-      // Server is always-on now — warm it in the background, don't block startup.
-      fetch(`${API_BASE}/api/health`).catch(() => {});
-      setStage("landing");
-    })();
+    // Show the landing immediately — never block on anything that can hang.
+    // (Do NOT warm the mic here: getUserMedia can stall after the biometric
+    // prompt recreates the Activity, and holding the mic open routes the landing
+    // TTS to the earpiece. The mic is opened lazily by the create flow instead.)
+    setStage("landing");
+    fetch(`${API_BASE}/api/health`).catch(() => {}); // warm server in background
+    NativeBiometric.isAvailable()
+      .then((r) => setBioAvailable(!!r.isAvailable))
+      .catch(() => setBioAvailable(false));
   }, []);
 
   // ── UI ──────────────────────────────────────────────────

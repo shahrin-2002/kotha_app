@@ -110,32 +110,36 @@ const GOOGLE_TTS_VOICE = process.env.GOOGLE_TTS_VOICE ?? "bn-IN-Chirp3-HD-Aoede"
 async function googleCloudTTS(text: string): Promise<Buffer | null> {
   const key = process.env.GOOGLE_API_KEY ?? "";
   if (!key) return null;
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 8000);
-  try {
-    const r = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${key}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        input: { text },
-        voice: { languageCode: "bn-IN", name: GOOGLE_TTS_VOICE },
-        audioConfig: { audioEncoding: "MP3", sampleRateHertz: 24000 },
-      }),
-      signal: ctl.signal,
-    });
-    if (!r.ok) {
-      console.error(`[Google TTS] status ${r.status}: ${(await r.text()).slice(0, 120)}`);
-      return null;
+  // Retry Google itself on a transient failure. Switching to a DIFFERENT provider
+  // (Cartesia / Google-Translate) makes the voice audibly change tone between
+  // prompts — so we stay on the same Google voice and just try again.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 8000);
+    try {
+      const r = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${key}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          input: { text },
+          voice: { languageCode: "bn-IN", name: GOOGLE_TTS_VOICE },
+          audioConfig: { audioEncoding: "MP3", sampleRateHertz: 24000 },
+        }),
+        signal: ctl.signal,
+      });
+      if (r.ok) {
+        const d = (await r.json()) as { audioContent?: string };
+        if (d.audioContent) return Buffer.from(d.audioContent, "base64");
+      } else {
+        console.error(`[Google TTS] attempt ${attempt} status ${r.status}: ${(await r.text()).slice(0, 120)}`);
+      }
+    } catch (e: any) {
+      console.error(`[Google TTS] attempt ${attempt} error:`, e.message);
+    } finally {
+      clearTimeout(timer);
     }
-    const d = (await r.json()) as { audioContent?: string };
-    if (!d.audioContent) return null;
-    return Buffer.from(d.audioContent, "base64");
-  } catch (e: any) {
-    console.error("[Google TTS] error:", e.message);
-    return null;
-  } finally {
-    clearTimeout(timer);
   }
+  return null;
 }
 
 async function cartesiaTTS(text: string): Promise<Buffer | null> {
@@ -190,8 +194,11 @@ app.get("/api/tts", async (req, res) => {
     return;
   }
   try {
-    // Primary: Google Cloud Chirp3-HD (natural bn-IN, ~1.5s). Fallbacks: Cartesia, then Google Translate.
-    const audio = (await googleCloudTTS(text)) ?? (await cartesiaTTS(text)) ?? (await googleTTS(text));
+    // One consistent voice: Google Cloud Chirp3-HD (retries internally). Only if
+    // Google is completely unavailable do we drop to Google Translate as a last
+    // resort — Cartesia is intentionally NOT used (different voice = tone jumps,
+    // and it was the source of the ~20s hang).
+    const audio = (await googleCloudTTS(text)) ?? (await googleTTS(text));
     if (!audio) {
       res.status(502).json({ error: "TTS failed" });
       return;
