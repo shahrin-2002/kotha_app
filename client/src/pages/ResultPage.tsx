@@ -10,7 +10,9 @@ export function ResultPage({ promptText, onAutoAdvance }: Props) {
   onAutoAdvanceRef.current = onAutoAdvance;
 
   useEffect(() => {
-    const timer = setTimeout(() => onAutoAdvanceRef.current(), 5000);
+    // Give the spoken success message time to finish + a moment to read it
+    // (the readback is ~5s; 5s total cut it off and jumped home too fast).
+    const timer = setTimeout(() => onAutoAdvanceRef.current(), 10000);
     return () => clearTimeout(timer);
   }, []);
 

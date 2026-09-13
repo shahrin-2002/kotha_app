@@ -39,7 +39,7 @@ export function BalancePage({ promptText, balance, transactions, onAutoAdvance }
   onAutoAdvanceRef.current = onAutoAdvance;
 
   useEffect(() => {
-    const timer = setTimeout(() => onAutoAdvanceRef.current(), 5000);
+    const timer = setTimeout(() => onAutoAdvanceRef.current(), 10000);
     return () => clearTimeout(timer);
   }, []);
 
