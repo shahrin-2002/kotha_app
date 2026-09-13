@@ -12,6 +12,7 @@ import {
   initDatabase,
   getRecipients,
   getAgents,
+  addAgent,
   getFirstParticipant,
   getParticipant,
   updateBalance,
@@ -550,7 +551,7 @@ app.post("/api/voice-turn", async (req, res) => {
   }
 
   // Detect task abort (was active, now back to home with no completion)
-  if (prevTaskType && !session.task_type && !result.ui_update.task_complete && prevTaskType !== "add_contact") {
+  if (prevTaskType && !session.task_type && !result.ui_update.task_complete && prevTaskType !== "add_contact" && prevTaskType !== "add_agent") {
     endTaskMetric(session.session_id, false);
   }
 
@@ -562,6 +563,17 @@ app.post("/api/voice-turn", async (req, res) => {
       ?? session.filled_slots["phone_number"] as string;
     if (contactName && phoneNumber) {
       addRecipient(contactName, phoneNumber, session.participant_id);
+    }
+  }
+
+  // Handle add_agent completion
+  if (prevTaskType === "add_agent" && session.awaiting_post_transaction) {
+    const agentName = result.ui_update.filled_slots["agent_name"] as string
+      ?? session.filled_slots["agent_name"] as string;
+    const agentPhone = result.ui_update.filled_slots["phone_number"] as string
+      ?? session.filled_slots["phone_number"] as string;
+    if (agentName && agentPhone) {
+      addAgent(agentName, agentPhone);
     }
   }
 
@@ -635,7 +647,7 @@ app.post("/api/tap", async (req, res) => {
     }
   }
 
-  if (prevTaskType && !session.task_type && !result.ui_update.task_complete && prevTaskType !== "add_contact") {
+  if (prevTaskType && !session.task_type && !result.ui_update.task_complete && prevTaskType !== "add_contact" && prevTaskType !== "add_agent") {
     endTaskMetric(session.session_id, false);
   }
 
@@ -645,6 +657,15 @@ app.post("/api/tap", async (req, res) => {
     const phoneNumber = result.ui_update.filled_slots["phone_number"] as string;
     if (contactName && phoneNumber) {
       addRecipient(contactName, phoneNumber, session.participant_id);
+    }
+  }
+
+  // Handle add_agent completion
+  if (prevTaskType === "add_agent" && session.awaiting_post_transaction) {
+    const agentName = result.ui_update.filled_slots["agent_name"] as string;
+    const agentPhone = result.ui_update.filled_slots["phone_number"] as string;
+    if (agentName && agentPhone) {
+      addAgent(agentName, agentPhone);
     }
   }
 

@@ -36,7 +36,7 @@
   "cash_out.insufficient_balance": "আপনার ব্যালেন্স যথেষ্ট নয়। এখন আছে {balance} টাকা।",
   "cash_out.below_minimum": "কমপক্ষে ৫০০ টাকা তুলতে হবে।",
   "cash_out.above_maximum": "একবারে সর্বোচ্চ ২৫,০০০ টাকা তোলা যায়।",
-  "cash_out.confirm_readback": "{agent_name} এজেন্ট থেকে {amount} টাকা তোলা হবে। ঠিক আছে? হ্যাঁ বা না বলুন।",
+  "cash_out.confirm_readback": "{agent_name} থেকে {amount} টাকা তোলা হবে। ঠিক আছে? হ্যাঁ বা না বলুন।",
   "cash_out.what_to_change": "কী পরিবর্তন করবেন — এজেন্ট নাকি টাকা?",
   "cash_out.enter_pin": "নিশ্চিত করতে আঙুলের ছাপ দিন।",
   "cash_out.wrong_pin": "মিলল না। আবার আঙুলের ছাপ দিন।",
@@ -109,6 +109,13 @@
   "add_contact.number_clarify": "নম্বরটি আবার বলুন। এগারো সংখ্যার নম্বর দিন।",
   "add_contact.confirm": "{contact_name}, নম্বর {phone_number} — ঠিক আছে?",
   "add_contact.success": "যোগ হয়েছে। এখন {contact_name}-কে টাকা পাঠাতে পারবেন।",
+
+  "add_agent.say_name": "নতুন এজেন্ট যোগ করি। এজেন্টের নাম বলুন।",
+  "add_agent.name_clarify": "এজেন্টের নামটি আবার বলুন।",
+  "add_agent.say_number": "এজেন্টের মোবাইল নম্বরটি বলুন।",
+  "add_agent.number_clarify": "নম্বরটি আবার বলুন। এগারো সংখ্যার নম্বর দিন।",
+  "add_agent.confirm": "{agent_name}, নম্বর {phone_number} — ঠিক আছে?",
+  "add_agent.success": "এজেন্ট যোগ হয়েছে। এখন {agent_name} থেকে ক্যাশ আউট করতে পারবেন।",
 
   "login.welcome": "{name}, স্বাগতম। আপনি কী করতে চান — টাকা পাঠাবেন, ক্যাশ আউট করবেন, রিচার্জ করবেন, বিল দেবেন, নাকি ব্যালেন্স দেখবেন?"
 }

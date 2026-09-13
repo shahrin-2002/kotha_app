@@ -217,6 +217,13 @@ export function getAgents(): Agent[] {
   return queryAll("SELECT id, name, phone, location FROM agents") as Agent[];
 }
 
+export function addAgent(name: string, phone: string, location = ""): Agent {
+  const id = uuid();
+  db.run("INSERT INTO agents (id, name, phone, location) VALUES (?, ?, ?, ?)", [id, name, phone, location]);
+  save();
+  return { id, name, phone, location };
+}
+
 export function getParticipant(id: string): Participant | undefined {
   return queryOne("SELECT * FROM participants WHERE id = ?", [id]) as Participant | undefined;
 }

@@ -157,6 +157,10 @@ function App() {
     session.sendTap("task_select", "add_contact");
   }, [session.sendTap]);
 
+  const handleAddAgent = useCallback(() => {
+    session.sendTap("task_select", "add_agent");
+  }, [session.sendTap]);
+
   const handleOnboardingStart = useCallback(() => {
     session.sendTap("onboarding", "start");
   }, [session.sendTap]);
@@ -289,6 +293,7 @@ function App() {
           agents={session.agents}
           promptText={session.promptText}
           onSelect={handleAgentSelect}
+          onAddAgent={handleAddAgent}
         />
       )}
 
