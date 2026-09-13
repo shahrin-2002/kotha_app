@@ -5,6 +5,7 @@ import crypto from "crypto";
 import { createServer } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import OpenAI from "openai";
+import speech from "@google-cloud/speech";
 import { loadPlans, resolvePrompt, getPrompts } from "./core/planRegistry.js";
 import { createSession, logEvent } from "./core/sessionContext.js";
 import { startTask, handleVoiceTurn, handleTapSelection } from "./core/orchestrator.js";
@@ -173,6 +174,10 @@ if (OPENAI_API_KEY) {
 
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY ?? "";
 if (GOOGLE_API_KEY) console.log("Google Speech-to-Text enabled (bn-BD)");
+
+// Streaming STT client (gRPC) — reuses the same API key; used by the /ws endpoint.
+const speechClient = GOOGLE_API_KEY ? new speech.SpeechClient({ apiKey: GOOGLE_API_KEY }) : null;
+if (speechClient) console.log("Google streaming STT enabled (gRPC)");
 
 // Google Cloud Speech-to-Text (Bangla) — better on names/numbers than Whisper.
 async function googleSTT(audio: Buffer): Promise<string | null> {
@@ -721,16 +726,65 @@ const server = createServer(app);
 const wss = new WebSocketServer({ server, path: "/ws" });
 
 wss.on("connection", (ws: WebSocket) => {
-  console.log("WebSocket client connected");
+  let recognizeStream: any = null;
 
-  ws.on("message", (data: Buffer) => {
-    // Future: handle raw audio streaming for real-time STT
-    // For now, REST /api/voice-turn handles text transcripts
-    ws.send(JSON.stringify({ status: "ws_connected", message: "ওয়েবসকেট সংযুক্ত" }));
+  const endStream = () => {
+    if (recognizeStream) {
+      try { recognizeStream.end(); } catch {}
+      try { recognizeStream.removeAllListeners(); } catch {}
+      recognizeStream = null;
+    }
+  };
+
+  const startStream = () => {
+    if (!speechClient) { ws.send(JSON.stringify({ type: "error", message: "stt not configured" })); return; }
+    endStream();
+    recognizeStream = speechClient.streamingRecognize({
+      config: {
+        encoding: "LINEAR16",
+        sampleRateHertz: 16000,
+        languageCode: "bn-BD",
+        enableAutomaticPunctuation: false,
+        model: "default",
+      },
+      interimResults: true, // Google marks a result isFinal at end-of-speech (our end-of-turn)
+    } as any)
+      .on("data", (data: any) => {
+        if (data.speechEventType === "END_OF_SINGLE_UTTERANCE") {
+          if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: "endOfTurn" }));
+          return;
+        }
+        const result = data.results?.[0];
+        const transcript = result?.alternatives?.[0]?.transcript;
+        if (transcript && ws.readyState === ws.OPEN) {
+          ws.send(JSON.stringify({ type: result.isFinal ? "final" : "interim", transcript }));
+        }
+      })
+      .on("error", (e: any) => {
+        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: "error", message: e.message }));
+        recognizeStream = null;
+      })
+      .on("end", () => {
+        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: "streamEnd" }));
+        recognizeStream = null;
+      });
+  };
+
+  ws.on("message", (data: Buffer, isBinary: boolean) => {
+    if (isBinary) {
+      if (recognizeStream && !recognizeStream.destroyed) {
+        try { recognizeStream.write(data); } catch {}
+      }
+      return;
+    }
+    let msg: any;
+    try { msg = JSON.parse(data.toString()); } catch { return; }
+    if (msg.type === "start") startStream();
+    else if (msg.type === "stop") endStream();
   });
 
   ws.on("close", () => {
-    console.log("WebSocket client disconnected");
+    if (recognizeStream) { try { recognizeStream.destroy(); } catch {} recognizeStream = null; }
   });
 });
 

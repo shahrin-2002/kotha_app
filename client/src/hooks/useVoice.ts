@@ -1,20 +1,16 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
+const WS_URL =
+  (API_BASE || (typeof location !== "undefined" ? location.origin : "")).replace(/^http/, "ws") + "/ws";
 
 type VoiceState = "idle" | "listening" | "speaking" | "error";
 
-// Send the whole prompt as ONE request so a prompt is always a single voice
-// (chunking caused Cartesia/Google to alternate mid-sentence). Cartesia Sonic
-// handles long transcripts fine; only very long text is split as a safety net.
 function splitText(text: string, maxLen = 2000): string[] {
   const chunks: string[] = [];
   let remaining = text;
   while (remaining.length > 0) {
-    if (remaining.length <= maxLen) {
-      chunks.push(remaining);
-      break;
-    }
+    if (remaining.length <= maxLen) { chunks.push(remaining); break; }
     let splitAt = remaining.lastIndexOf("।", maxLen);
     if (splitAt < 0) splitAt = remaining.lastIndexOf(",", maxLen);
     if (splitAt < 0) splitAt = remaining.lastIndexOf(" ", maxLen);
@@ -22,7 +18,20 @@ function splitText(text: string, maxLen = 2000): string[] {
     chunks.push(remaining.substring(0, splitAt + 1).trim());
     remaining = remaining.substring(splitAt + 1).trim();
   }
-  return chunks.filter(c => c.length > 0);
+  return chunks.filter((c) => c.length > 0);
+}
+
+// Downsample Float32 @ inRate to 16 kHz Int16 (LINEAR16) for Google streaming STT.
+function downsampleTo16kInt16(input: Float32Array, inRate: number): Int16Array {
+  const ratio = inRate / 16000;
+  const outLen = Math.floor(input.length / ratio);
+  const out = new Int16Array(outLen);
+  for (let i = 0; i < outLen; i++) {
+    let s = input[Math.floor(i * ratio)];
+    s = Math.max(-1, Math.min(1, s));
+    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+  }
+  return out;
 }
 
 export function useVoice() {
@@ -31,382 +40,191 @@ export function useVoice() {
   const [interimText, setInterimText] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [debugLog, setDebugLog] = useState<string[]>([]);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const isSpeakingRef = useRef(false);
-  const ttsEndedAtRef = useRef<number>(0); // when the AI last finished speaking (for echo cooldown)
-  const lastSpokenTextRef = useRef(""); // the AI's last prompt text (for echo-text filtering)
-  const echoFilterRef = useRef(true); // disable on menu screens where prompts list the commands
-  const longPauseRef = useRef(false); // true on number-entry screens (allow long pauses)
   const activatedRef = useRef(false);
   const seqRef = useRef(0);
-  const micReadyRef = useRef(false);
 
-  // Server STT refs
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const silenceStartRef = useRef<number>(0);
-  const recordStartRef = useRef<number>(0);
-  const isRecordingRef = useRef(false);
-  const chunksRef = useRef<Blob[]>([]);
-  const vadRunningRef = useRef(false);
-  const vadFrameRef = useRef<number>(0);
+  const wsRef = useRef<WebSocket | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const ctxRef = useRef<AudioContext | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const capturingRef = useRef(false);
+  const finalRef = useRef("");
+  const gotFinalRef = useRef(false);
 
   const addLog = useCallback((msg: string) => {
     console.log("[Voice]", msg);
-    setDebugLog((prev) => [...prev.slice(-8), `${new Date().toLocaleTimeString()} ${msg}`]);
+    setDebugLog((prev) => [...prev.slice(-8), msg]);
   }, []);
 
   useEffect(() => {
-    // Android WebView (Capacitor) has no window.speechSynthesis — the app uses
-    // server TTS (/api/tts) instead, so this browser-only preload is optional.
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-    const loadVoices = () => { window.speechSynthesis.getVoices(); };
+    const loadVoices = () => { try { window.speechSynthesis?.getVoices(); } catch {} };
     loadVoices();
-    window.speechSynthesis.addEventListener("voiceschanged", loadVoices);
-    return () => window.speechSynthesis.removeEventListener("voiceschanged", loadVoices);
   }, []);
 
-  const sendAudioToServer = useCallback(async (audioBlob: Blob) => {
-    // Ignore anything captured while the AI is speaking or during the echo cooldown
-    // right after (prevents transcribing the AI's own voice → repeating transcript)
-    if (isSpeakingRef.current || Date.now() - ttsEndedAtRef.current < 500) {
-      addLog("⏭️ dropped (AI speaking / echo cooldown)");
-      return;
+  // ── mic capture (streams PCM to server over WS) ──────────
+  const stopCapture = useCallback((sendStop = true) => {
+    capturingRef.current = false;
+    if (processorRef.current) { try { processorRef.current.disconnect(); } catch {} processorRef.current = null; }
+    if (sendStop && wsRef.current?.readyState === WebSocket.OPEN) {
+      try { wsRef.current.send(JSON.stringify({ type: "stop" })); } catch {}
     }
-    if (audioBlob.size < 1000) {
-      addLog(`⏭️ too small (${audioBlob.size}B)`);
-      return;
+  }, []);
+
+  const teardownMic = useCallback(() => {
+    stopCapture(false);
+    if (ctxRef.current) { try { ctxRef.current.close(); } catch {} ctxRef.current = null; }
+    if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; }
+  }, [stopCapture]);
+
+  const finalizeTurn = useCallback((text: string) => {
+    const t = text.trim();
+    setInterimText("");
+    stopCapture(true);
+    if (t) {
+      gotFinalRef.current = true;
+      seqRef.current++;
+      addLog(`✅ "${t}"`);
+      setTranscript(t + "\x00" + seqRef.current);
     }
-    const sizeKB = (audioBlob.size / 1024).toFixed(1);
-    addLog(`📤 ${sizeKB}KB → Whisper...`);
-    setInterimText("চিনছি...");
+  }, [stopCapture, addLog]);
+
+  const ensureWS = useCallback(() => new Promise<WebSocket | null>((resolve) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) { resolve(wsRef.current); return; }
     try {
-      const resp = await fetch(`${API_BASE}/api/stt`, {
-        method: "POST",
-        headers: { "Content-Type": "audio/webm" },
-        body: audioBlob,
-      });
-      const data = await resp.json();
-      if (!resp.ok) {
-        addLog(`❌ STT ${resp.status}: ${data.error || data.detail}`);
-        setInterimText("");
-        return;
-      }
-      if (data.transcript && data.transcript.trim()) {
-        const text = data.transcript.trim();
-        // Echo guard: if what we "heard" is really a chunk of the AI's last prompt
-        // (e.g. hearing "পাঠাবেন" from "কাকে টাকা পাঠাবেন"), drop it — it's the
-        // loudspeaker echo, not the user, and would otherwise loop forever.
-        if (echoFilterRef.current) {
-          const norm = (s: string) => s.replace(/[\s।,?!.।]/g, "");
-          const nt = norm(text), np = norm(lastSpokenTextRef.current);
-          const chunk = nt.slice(0, Math.max(4, Math.floor(nt.length * 0.7)));
-          if (np && chunk.length >= 4 && np.includes(chunk)) {
-            addLog(`⏭️ echo dropped "${text}"`);
-            setInterimText("");
-            return;
-          }
+      const ws = new WebSocket(WS_URL);
+      ws.binaryType = "arraybuffer";
+      let settled = false;
+      ws.onopen = () => { addLog("🔌 WS open"); if (!settled) { settled = true; resolve(ws); } };
+      ws.onerror = () => { addLog("🔌 WS error"); if (!settled) { settled = true; resolve(null); } };
+      ws.onclose = () => { if (wsRef.current === ws) wsRef.current = null; };
+      ws.onmessage = (ev) => {
+        if (typeof ev.data !== "string") return;
+        let msg: any; try { msg = JSON.parse(ev.data); } catch { return; }
+        if (isSpeakingRef.current) return; // ignore anything while the AI is talking
+        if (msg.type === "interim") { setInterimText(msg.transcript || ""); }
+        else if (msg.type === "final") { finalRef.current = msg.transcript || ""; if (finalRef.current) finalizeTurn(finalRef.current); }
+        else if (msg.type === "endOfTurn") { capturingRef.current = false; if (processorRef.current) { try { processorRef.current.disconnect(); } catch {} processorRef.current = null; } }
+        else if (msg.type === "streamEnd") {
+          // If Google ended with nothing recognized, keep listening for the user
+          if (!gotFinalRef.current && activatedRef.current && !isSpeakingRef.current) startCaptureRef.current?.();
         }
-        addLog(`✅ "${text}"`);
-        setInterimText("");
-        seqRef.current++;
-        setTranscript(text + "\x00" + seqRef.current);
-      } else {
-        addLog("⏭️ empty result");
-        setInterimText("");
-      }
-    } catch (err: any) {
-      addLog(`❌ fetch: ${err.message}`);
-      setInterimText("");
-    }
-  }, [addLog]);
+        else if (msg.type === "error") { addLog("STT err: " + msg.message); }
+      };
+      wsRef.current = ws;
+    } catch { resolve(null); }
+  }), [addLog, finalizeTurn]);
 
-  const stopVAD = useCallback(() => {
-    vadRunningRef.current = false;
-    if (vadFrameRef.current) {
-      cancelAnimationFrame(vadFrameRef.current);
-      vadFrameRef.current = 0;
-    }
-    if (recorderRef.current && recorderRef.current.state === "recording") {
-      try { recorderRef.current.stop(); } catch {}
-    }
-    recorderRef.current = null;
-    isRecordingRef.current = false;
-    silenceStartRef.current = 0;
-  }, []);
-
-  const startVAD = useCallback(async () => {
-    if (vadRunningRef.current) return;
-    if (!analyserRef.current || !mediaStreamRef.current) {
-      addLog("⚠️ mic not ready for VAD");
-      return;
-    }
-
-    // Resume AudioContext if suspended (happens after user interaction + audio playback)
-    if (audioContextRef.current && audioContextRef.current.state === "suspended") {
-      addLog("🔄 resuming AudioContext...");
-      await audioContextRef.current.resume();
-    }
-
-    vadRunningRef.current = true;
-    const analyser = analyserRef.current;
-    const stream = mediaStreamRef.current;
-    const dataArray = new Uint8Array(analyser.fftSize);
-    const START_THRESHOLD = 4;   // lower = triggers on quieter speech (no need to shout)
-    const STOP_THRESHOLD = 3;    // detect end-of-speech even with mild background noise
-    // Numbers (phone/account/amount) are recited with pauses between digit groups,
-    // so those screens use a longer silence window + cap; normal turns stay snappy.
-    const SILENCE_DURATION = longPauseRef.current ? 2200 : 600;
-    const MAX_RECORD_DURATION = longPauseRef.current ? 15000 : 6000;
-    let frameCount = 0;
-
-    // Check stream health
-    const track = stream.getAudioTracks()[0];
-    addLog(`🟢 VAD start | ctx=${audioContextRef.current?.state} track=${track?.readyState}/${track?.enabled ? "on" : "muted"}`);
-    setVoiceState("listening");
-
-    const ECHO_COOLDOWN = 600; // ignore mic ~0.6s after it re-opens (kills loudspeaker echo tail)
-
-    const loop = () => {
-      if (!vadRunningRef.current) return;
-
-      // Don't listen while the AI is speaking, or briefly after (speaker echo).
-      // Crucially, ABORT any recording already in progress so the AI's own voice
-      // is never captured and re-transcribed (the repeating-transcript bug).
-      if (isSpeakingRef.current || Date.now() - ttsEndedAtRef.current < ECHO_COOLDOWN) {
-        if (isRecordingRef.current && recorderRef.current) {
-          recorderRef.current.onstop = null;
-          try { recorderRef.current.stop(); } catch {}
-          recorderRef.current = null;
-          isRecordingRef.current = false;
-          silenceStartRef.current = 0;
-        }
-        vadFrameRef.current = requestAnimationFrame(loop);
-        return;
-      }
-
-      // Use time-domain data (waveform) — values centered at 128, deviations = sound
-      analyser.getByteTimeDomainData(dataArray);
-      let maxDeviation = 0;
-      for (let i = 0; i < dataArray.length; i++) {
-        const deviation = Math.abs(dataArray[i] - 128);
-        if (deviation > maxDeviation) maxDeviation = deviation;
-      }
-      const avg = maxDeviation;
-
-      frameCount++;
-      if (frameCount % 90 === 0) {
-        addLog(`📊 level=${avg.toFixed(1)} ${isRecordingRef.current ? "🔴REC" : "⚪wait"}`);
-      }
-
-      // Safety net: force-finalize if a single utterance runs too long
-      if (isRecordingRef.current && Date.now() - recordStartRef.current > MAX_RECORD_DURATION) {
-        if (recorderRef.current && recorderRef.current.state === "recording") {
-          recorderRef.current.stop();
-          addLog(`⏹️ max duration → Whisper`);
-        }
-        recorderRef.current = null;
-        isRecordingRef.current = false;
-        silenceStartRef.current = 0;
-        vadFrameRef.current = requestAnimationFrame(loop);
-        return;
-      }
-
-      const threshold = isRecordingRef.current ? STOP_THRESHOLD : START_THRESHOLD;
-      if (avg > threshold) {
-        if (!isRecordingRef.current) {
-          chunksRef.current = [];
-          try {
-            const recorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
-            recorder.ondataavailable = (e) => {
-              if (e.data.size > 0) chunksRef.current.push(e.data);
-            };
-            recorder.onstop = () => {
-              const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-              sendAudioToServer(blob);
-            };
-            recorder.start(100);
-            recorderRef.current = recorder;
-            isRecordingRef.current = true;
-            recordStartRef.current = Date.now();
-            setInterimText("🎤 শুনছি...");
-            addLog(`🔴 REC (level=${avg.toFixed(1)})`);
-          } catch (e: any) {
-            addLog(`❌ recorder: ${e.message}`);
-          }
-        }
-        silenceStartRef.current = 0;
-      } else if (isRecordingRef.current) {
-        if (silenceStartRef.current === 0) {
-          silenceStartRef.current = Date.now();
-        } else if (Date.now() - silenceStartRef.current > SILENCE_DURATION) {
-          const recordDuration = Date.now() - recordStartRef.current;
-          if (recordDuration < 300) {
-            // Too short — likely noise, discard
-            if (recorderRef.current && recorderRef.current.state === "recording") {
-              recorderRef.current.onstop = null;
-              try { recorderRef.current.stop(); } catch {}
-            }
-            addLog(`⏭️ too short (${recordDuration}ms)`);
-          } else if (recorderRef.current && recorderRef.current.state === "recording") {
-            recorderRef.current.stop();
-            addLog(`⏹️ silence → Whisper (${(recordDuration / 1000).toFixed(1)}s)`);
-          }
-          recorderRef.current = null;
-          isRecordingRef.current = false;
-          silenceStartRef.current = 0;
-        }
-      }
-
-      vadFrameRef.current = requestAnimationFrame(loop);
-    };
-
-    vadFrameRef.current = requestAnimationFrame(loop);
-  }, [addLog, sendAudioToServer]);
+  const startCaptureRef = useRef<null | (() => Promise<void>)>(null);
 
   const initMic = useCallback(async (): Promise<boolean> => {
-    if (micReadyRef.current && mediaStreamRef.current) return true;
-
-    addLog("🎤 requesting mic...");
+    if (streamRef.current && ctxRef.current) return true;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,   // cancel speaker echo (esp. on phone)
-          noiseSuppression: true,   // suppress background noise
-          autoGainControl: true,    // boost quiet speech so user needn't speak loudly
-          channelCount: 1,
-        },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
       });
-      mediaStreamRef.current = stream;
-      const trackLabel = stream.getAudioTracks()[0]?.label ?? "unknown";
-      addLog(`🎤 mic OK: ${trackLabel}`);
-
-      const audioCtx = new AudioContext();
-      audioContextRef.current = audioCtx;
-
-      if (audioCtx.state === "suspended") {
-        await audioCtx.resume();
-      }
-
-      const source = audioCtx.createMediaStreamSource(stream);
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.3;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-
-      micReadyRef.current = true;
-      addLog(`🎤 AudioContext=${audioCtx.state}, sampleRate=${audioCtx.sampleRate}`);
+      streamRef.current = stream;
+      const ctx = new AudioContext();
+      if (ctx.state === "suspended") await ctx.resume();
+      ctxRef.current = ctx;
+      addLog(`🎤 mic ready @${ctx.sampleRate}Hz`);
       return true;
-    } catch (err: any) {
-      addLog(`❌ mic denied: ${err.message}`);
+    } catch (e: any) {
+      addLog("❌ mic: " + (e?.message || e));
       setErrorMsg("মাইক্রোফোন অনুমতি দিন।");
       setVoiceState("error");
       return false;
     }
   }, [addLog]);
 
-  const teardownMic = useCallback(() => {
-    stopVAD();
-    micReadyRef.current = false;
-    if (audioContextRef.current) {
-      try { audioContextRef.current.close(); } catch {}
-      audioContextRef.current = null;
+  const startCapture = useCallback(async () => {
+    if (!activatedRef.current || isSpeakingRef.current) return;
+    const ok = await initMic();
+    if (!ok) return;
+    const ws = await ensureWS();
+    if (!ws) { setErrorMsg("সার্ভারে সংযোগ করা যাচ্ছে না।"); return; }
+    const ctx = ctxRef.current!;
+    const stream = streamRef.current!;
+    finalRef.current = "";
+    gotFinalRef.current = false;
+    setInterimText("");
+    try { ws.send(JSON.stringify({ type: "start" })); } catch {}
+
+    const source = ctx.createMediaStreamSource(stream);
+    const processor = ctx.createScriptProcessor(4096, 1, 1);
+    processorRef.current = processor;
+    capturingRef.current = true;
+    processor.onaudioprocess = (e) => {
+      if (!capturingRef.current || isSpeakingRef.current) return;
+      if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+      const pcm = downsampleTo16kInt16(e.inputBuffer.getChannelData(0), ctx.sampleRate);
+      try { wsRef.current.send(pcm.buffer as ArrayBuffer); } catch {}
+    };
+    // Route through a muted gain so onaudioprocess fires without echoing mic to the speaker
+    const mute = ctx.createGain();
+    mute.gain.value = 0;
+    source.connect(processor);
+    processor.connect(mute);
+    mute.connect(ctx.destination);
+    setVoiceState("listening");
+    addLog("🎙️ streaming");
+  }, [initMic, ensureWS, addLog]);
+  startCaptureRef.current = startCapture;
+
+  // ── TTS ──────────────────────────────────────────────────
+  const speakWithServerTTS = useCallback(async (text: string): Promise<void> => {
+    const chunks = splitText(text);
+    setVoiceState("speaking");
+    for (const chunk of chunks) {
+      await new Promise<void>((resolve) => {
+        const audio = new Audio(`${API_BASE}/api/tts?text=${encodeURIComponent(chunk)}`);
+        audioRef.current = audio;
+        audio.onended = () => resolve();
+        audio.onerror = () => resolve();
+        audio.play().catch(() => resolve());
+      });
     }
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(t => t.stop());
-      mediaStreamRef.current = null;
-    }
-    analyserRef.current = null;
-  }, [stopVAD]);
+  }, []);
+
+  const speak = useCallback(async (text: string): Promise<void> => {
+    if (audioRef.current) { try { audioRef.current.pause(); } catch {} audioRef.current = null; }
+    isSpeakingRef.current = true;
+    // Release the mic so TTS plays on the loudspeaker (open mic → earpiece routing).
+    stopCapture(true);
+    teardownMic();
+    await new Promise((r) => setTimeout(r, 80));
+    await speakWithServerTTS(text);
+    isSpeakingRef.current = false;
+    addLog("🔊 TTS done → listening");
+    // Let the loudspeaker settle before re-opening the mic (avoids echo).
+    await new Promise((r) => setTimeout(r, 400));
+    if (activatedRef.current) { await startCapture(); }
+    else setVoiceState("idle");
+  }, [stopCapture, teardownMic, speakWithServerTTS, startCapture, addLog]);
+
+  const stopSpeaking = useCallback(() => {
+    if (audioRef.current) { try { audioRef.current.pause(); } catch {} audioRef.current = null; }
+    isSpeakingRef.current = false;
+    setVoiceState("idle");
+  }, []);
 
   const startListening = useCallback(async () => {
     activatedRef.current = true;
     setErrorMsg("");
     addLog("🟢 activated");
-    // Warm up the mic immediately so the first listen (right after the welcome
-    // prompt) starts instantly instead of after a cold getUserMedia init.
-    if (!micReadyRef.current) {
-      await initMic();
-    }
-  }, [addLog, initMic]);
+    await ensureWS();
+    await initMic();
+  }, [addLog, ensureWS, initMic]);
 
   const stopListening = useCallback(() => {
     activatedRef.current = false;
+    stopCapture(true);
     teardownMic();
+    if (wsRef.current) { try { wsRef.current.close(); } catch {} wsRef.current = null; }
     setVoiceState("idle");
-  }, [teardownMic]);
-
-  const speakWithServerTTS = useCallback(async (text: string): Promise<void> => {
-    lastSpokenTextRef.current = text; // remember for the echo-text filter
-    const chunks = splitText(text);
-    addLog(`🔊 TTS (${chunks.length} parts)`);
-    setVoiceState("speaking");
-
-    for (const chunk of chunks) {
-      await new Promise<void>((resolve) => {
-        const url = `${API_BASE}/api/tts?text=${encodeURIComponent(chunk)}`;
-        const audio = new Audio(url);
-        audioRef.current = audio;
-        audio.onended = () => resolve();
-        audio.onerror = () => {
-          addLog("🔊 audio error");
-          resolve();
-        };
-        audio.play().catch((err) => {
-          addLog(`🔊 play: ${err.message}`);
-          resolve();
-        });
-      });
-    }
-  }, [addLog]);
-
-  const speak = useCallback(async (text: string): Promise<void> => {
-    // Cancel any currently playing audio first
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
-    }
-    isSpeakingRef.current = true;
-    stopVAD();
-
-    // Release the mic BEFORE speaking. An open mic forces Android into
-    // communication mode and routes audio to the earpiece (TTS inaudible).
-    // Releasing it lets TTS play through the loudspeaker; we re-acquire after.
-    teardownMic();
-    await new Promise((r) => setTimeout(r, 60));
-
-    await speakWithServerTTS(text);
-
-    isSpeakingRef.current = false;
-    // Small gap so the loudspeaker fully stops before we re-open the mic.
-    await new Promise((r) => setTimeout(r, 250));
-    addLog("🔊 TTS done → listening");
-
-    if (activatedRef.current) {
-      const ok = await initMic();
-      if (ok) {
-        // Start the echo-cooldown NOW (mic is live), not when TTS ended — mic
-        // re-init takes time, so anchoring here guarantees a full quiet window.
-        ttsEndedAtRef.current = Date.now();
-        await startVAD();
-      }
-    } else {
-      setVoiceState("idle");
-    }
-  }, [stopVAD, startVAD, initMic, teardownMic, addLog, speakWithServerTTS]);
-
-  const stopSpeaking = useCallback(() => {
-    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
-    }
-    isSpeakingRef.current = false;
-    setVoiceState("idle");
-  }, []);
+  }, [stopCapture, teardownMic]);
 
   return {
     voiceState,
@@ -419,7 +237,7 @@ export function useVoice() {
     stopListening,
     speak,
     stopSpeaking,
-    setLongPause: (v: boolean) => { longPauseRef.current = v; },
-    setEchoFilter: (v: boolean) => { echoFilterRef.current = v; },
+    setLongPause: (_v: boolean) => {},  // handled by Google endpointing now
+    setEchoFilter: (_v: boolean) => {}, // handled by not capturing during/just-after TTS
   };
 }
