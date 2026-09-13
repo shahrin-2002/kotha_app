@@ -161,55 +161,74 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? "";
 let openaiClient: OpenAI | null = null;
 if (OPENAI_API_KEY) {
   openaiClient = new OpenAI({ apiKey: OPENAI_API_KEY });
-  console.log("OpenAI Whisper STT enabled");
-} else {
-  console.log("⚠️ No OPENAI_API_KEY — server STT disabled");
+  console.log("OpenAI Whisper STT enabled (fallback)");
+}
+
+const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY ?? "";
+if (GOOGLE_API_KEY) console.log("Google Speech-to-Text enabled (bn-BD)");
+
+// Google Cloud Speech-to-Text (Bangla) — better on names/numbers than Whisper.
+async function googleSTT(audio: Buffer): Promise<string | null> {
+  if (!GOOGLE_API_KEY) return null;
+  try {
+    const r = await fetch(`https://speech.googleapis.com/v1/speech:recognize?key=${GOOGLE_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        config: { encoding: "WEBM_OPUS", languageCode: "bn-BD", maxAlternatives: 1, model: "default" },
+        audio: { content: audio.toString("base64") },
+      }),
+    });
+    if (!r.ok) {
+      console.error("[Google STT]", r.status, (await r.text()).slice(0, 160));
+      return null;
+    }
+    const data: any = await r.json();
+    return ((data?.results ?? []).map((x: any) => x?.alternatives?.[0]?.transcript ?? "").join(" ")).trim();
+  } catch (e: any) {
+    console.error("[Google STT error]", e.message);
+    return null;
+  }
+}
+
+async function openaiSTT(audio: Buffer): Promise<string | null> {
+  if (!openaiClient) return null;
+  try {
+    const file = new File([audio], "audio.webm", { type: "audio/webm" });
+    const tr = await openaiClient.audio.transcriptions.create({
+      file, model: "gpt-4o-transcribe", language: "bn", temperature: 0,
+      prompt: "এটি বাংলা ভাষায় মোবাইল ব্যাংকিং কথোপকথন। ব্যবহারকারী বাংলায় কমান্ড বলছেন যেমন টাকা পাঠাও, ক্যাশ আউট, রিচার্জ, বিল দাও, ব্যালেন্স।",
+    });
+    return (tr.text ?? "").trim();
+  } catch (e: any) {
+    console.error("[OpenAI STT error]", e.message);
+    return null;
+  }
 }
 
 app.post("/api/stt", async (req, res) => {
-  if (!openaiClient) {
-    res.status(503).json({ error: "STT not configured. Set OPENAI_API_KEY in .env" });
+  if (!GOOGLE_API_KEY && !openaiClient) {
+    res.status(503).json({ error: "STT not configured" });
     return;
   }
   try {
     const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(Buffer.from(chunk));
-    }
+    for await (const chunk of req) chunks.push(Buffer.from(chunk));
     const audioBuffer = Buffer.concat(chunks);
-    if (audioBuffer.length < 1000) {
-      res.json({ transcript: "" });
-      return;
-    }
+    if (audioBuffer.length < 1000) { res.json({ transcript: "" }); return; }
 
-    const file = new File([audioBuffer], "audio.webm", { type: "audio/webm" });
-    const transcription = await openaiClient.audio.transcriptions.create({
-      file,
-      model: "gpt-4o-transcribe",
-      language: "bn",
-      // Bias the model toward Bangla script + this app's domain to reduce language drift.
-      prompt: "এটি বাংলা ভাষায় মোবাইল ব্যাংকিং কথোপকথন। ব্যবহারকারী বাংলায় কমান্ড বলছেন যেমন টাকা পাঠাও, ক্যাশ আউট, রিচার্জ, বিল দাও, ব্যালেন্স।",
-      temperature: 0,
-    });
+    // Prefer Google bn-BD; fall back to OpenAI only if Google errors.
+    let t: string | null = await googleSTT(audioBuffer);
+    if (t === null) t = await openaiSTT(audioBuffer);
+    if (t === null) { res.json({ transcript: "" }); return; }
+    t = t.trim();
 
-    // Filter hallucinations — when given silence/noise, the model repeats junk
-    const t = (transcription.text ?? "").trim();
-    const isHallucination = t.length > 60 || t.includes("কথোপকথন") || t.includes("সাবটাইটেল") || t.includes("subscribe");
-    if (isHallucination) {
-      console.log(`[STT] hallucination filtered: "${t.substring(0, 50)}..."`);
-      res.json({ transcript: "" });
-      return;
-    }
+    const isHallucination = t.length > 60 || t.includes("সাবটাইটেল") || t.includes("subscribe");
+    if (isHallucination) { console.log("[STT] hallucination filtered"); res.json({ transcript: "" }); return; }
 
-    // Strictly Bangla: reject transcripts containing wrong scripts (Arabic, Devanagari,
-    // CJK, Cyrillic, Hangul, Thai). The model sometimes drifts to phonetically similar
-    // scripts on short/quiet clips — drop those so garbage never reaches the app.
+    // Strictly Bangla: reject wrong scripts (Arabic/Devanagari/CJK/Cyrillic/Hangul/Thai)
     const WRONG_SCRIPT = /[؀-ۿऀ-ॿ一-鿿Ѐ-ӿ가-힯฀-๿]/;
-    if (WRONG_SCRIPT.test(t)) {
-      console.log(`[STT] non-Bangla script rejected: "${t.substring(0, 50)}"`);
-      res.json({ transcript: "" });
-      return;
-    }
+    if (WRONG_SCRIPT.test(t)) { console.log(`[STT] non-Bangla rejected: "${t.slice(0, 40)}"`); res.json({ transcript: "" }); return; }
 
     console.log(`[STT] "${t}"`);
     res.json({ transcript: t });
