@@ -186,9 +186,13 @@ function App() {
   // Number-entry screens: let the mic tolerate long pauses between digit groups
   useEffect(() => {
     voice.setLongPause(["enter_account", "enter_number", "enter_amount"].includes(screen));
-    // Echo filter drops transcripts matching the AI's prompt — but the home menu
-    // lists the commands, so disable it there (else "টাকা পাঠাবো" gets dropped).
-    voice.setEchoFilter(screen !== "home");
+    // Only run the echo filter where the user's answer is free-form (a name or
+    // number) and therefore can't legitimately match the prompt. On menu/confirm/
+    // operator screens the prompt lists the valid answers (টাকা পাঠাবেন / হ্যাঁ / না /
+    // গ্রামীণফোন…), so the filter would wrongly drop real replies there.
+    voice.setEchoFilter(
+      ["select_recipient", "select_agent", "enter_amount", "enter_number", "enter_account"].includes(screen)
+    );
   }, [screen, voice.setLongPause, voice.setEchoFilter]);
 
   if (appState === "login") {
