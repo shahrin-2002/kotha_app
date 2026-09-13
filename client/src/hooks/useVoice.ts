@@ -57,6 +57,9 @@ export function useVoice() {
   const silenceStartRef = useRef(0);     // when the current silence began
   const stoppedRef = useRef(false);      // already sent end-of-turn
   const captureStartRef = useRef(0);     // when capture began (grace period)
+  const lastActivityRef = useRef(0);     // last time we saw speech energy or a new word
+  const lastInterimRef = useRef("");     // last interim text (to detect changes)
+  const frameCountRef = useRef(0);
   const longPauseRef = useRef(false);    // longer silence tolerance on number screens
 
   const addLog = useCallback((msg: string) => {
@@ -109,7 +112,11 @@ export function useVoice() {
         if (typeof ev.data !== "string") return;
         let msg: any; try { msg = JSON.parse(ev.data); } catch { return; }
         if (isSpeakingRef.current) return; // ignore anything while the AI is talking
-        if (msg.type === "interim") { setInterimText(msg.transcript || ""); }
+        if (msg.type === "interim") {
+          const it = msg.transcript || "";
+          setInterimText(it);
+          if (it && it !== lastInterimRef.current) { lastInterimRef.current = it; lastActivityRef.current = Date.now(); startedRef.current = true; }
+        }
         else if (msg.type === "final") { finalRef.current = msg.transcript || ""; if (finalRef.current) finalizeTurn(finalRef.current); }
         else if (msg.type === "endOfTurn") { capturingRef.current = false; if (processorRef.current) { try { processorRef.current.disconnect(); } catch {} processorRef.current = null; } }
         else if (msg.type === "streamEnd") {
@@ -128,7 +135,9 @@ export function useVoice() {
     if (streamRef.current && ctxRef.current) return true;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+        // autoGainControl OFF so silence stays quiet (else it amplifies the gaps
+        // between words and end-of-turn silence is never detected).
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false, channelCount: 1 },
       });
       streamRef.current = stream;
       const ctx = new AudioContext();
@@ -158,6 +167,9 @@ export function useVoice() {
     silenceStartRef.current = 0;
     stoppedRef.current = false;
     captureStartRef.current = Date.now();
+    lastActivityRef.current = Date.now();
+    lastInterimRef.current = "";
+    frameCountRef.current = 0;
     setInterimText("");
     try { ws.send(JSON.stringify({ type: "start" })); } catch {}
 
@@ -172,23 +184,24 @@ export function useVoice() {
       const pcm = downsampleTo16kInt16(data, ctx.sampleRate);
       try { wsRef.current.send(pcm.buffer as ArrayBuffer); } catch {}
 
-      // Client-side endpointing: when speech is followed by silence, tell the
-      // server to end the Google stream so it returns the final transcript.
+      // Client-side endpointing: end the turn when speech is followed by silence.
+      // "Activity" = loud enough audio OR a new interim word from Google. When
+      // neither happens for the silence window, tell the server to finalize.
       const now = Date.now();
       if (now - captureStartRef.current < 350) return; // grace period (ignore TTS-tail echo)
       let peak = 0;
       for (let i = 0; i < data.length; i++) { const a = Math.abs(data[i]); if (a > peak) peak = a; }
-      if (peak > 0.02) {
+      frameCountRef.current++;
+      if (frameCountRef.current % 12 === 0) addLog(`📊 peak=${peak.toFixed(3)} started=${startedRef.current}`);
+      if (peak > 0.015) {
         startedRef.current = true;
-        silenceStartRef.current = 0;
-      } else if (startedRef.current && !stoppedRef.current) {
-        if (!silenceStartRef.current) silenceStartRef.current = now;
-        else if (now - silenceStartRef.current > (longPauseRef.current ? 2000 : 800)) {
-          stoppedRef.current = true;
-          capturingRef.current = false;
-          try { wsRef.current!.send(JSON.stringify({ type: "stop" })); } catch {}
-          addLog("⏹️ endpoint → finalize");
-        }
+        lastActivityRef.current = now;
+      }
+      if (startedRef.current && !stoppedRef.current && now - lastActivityRef.current > (longPauseRef.current ? 2000 : 900)) {
+        stoppedRef.current = true;
+        capturingRef.current = false;
+        try { wsRef.current!.send(JSON.stringify({ type: "stop" })); } catch {}
+        addLog("⏹️ endpoint → finalize");
       }
     };
     // Route through a muted gain so onaudioprocess fires without echoing mic to the speaker
